@@ -75,23 +75,40 @@ static void string_bswap16(uint16_t *s, size_t bytes)
 /**
  * Start a Q35 machine and bookmark a handle to the AHCI device.
  */
-static AHCIQState *ahci_boot(void)
+static AHCIQState *ahci_vboot(const char *cli, va_list ap)
 {
     AHCIQState *s;
-    const char *cli;
 
     s = g_malloc0(sizeof(AHCIQState));
-
-    cli = "-drive if=none,id=drive0,file=%s,cache=writeback,serial=%s"
-        ",format=qcow2"
-        " -M q35 "
-        "-device ide-hd,drive=drive0 "
-        "-global ide-hd.ver=%s";
-    s->parent = qtest_pc_boot(cli, tmp_path, "testdisk", "version");
+    s->parent = qtest_pc_vboot(cli, ap);
     alloc_set_flags(s->parent->alloc, ALLOC_LEAK_ASSERT);
 
     /* Verify that we have an AHCI device present. */
     s->dev = get_ahci_device(&s->fingerprint);
+
+    return s;
+}
+
+/**
+ * Start a Q35 machine and bookmark a handle to the AHCI device.
+ */
+static AHCIQState *ahci_boot(const char *cli, ...)
+{
+    AHCIQState *s;
+    va_list ap;
+
+    if (cli) {
+        va_start(ap, cli);
+        s = ahci_vboot(cli, ap);
+        va_end(ap);
+    } else {
+        cli = "-drive if=none,id=drive0,file=%s,cache=writeback,serial=%s"
+            ",format=qcow2"
+            " -M q35 "
+            "-device ide-hd,drive=drive0 "
+            "-global ide-hd.ver=%s";
+        s = ahci_boot(cli, tmp_path, "testdisk", "version");
+    }
 
     return s;
 }
@@ -102,7 +119,6 @@ static AHCIQState *ahci_boot(void)
 static void ahci_shutdown(AHCIQState *ahci)
 {
     QOSState *qs = ahci->parent;
-
     ahci_clean_mem(ahci);
     free_ahci_device(ahci->dev);
     g_free(ahci);
@@ -113,10 +129,18 @@ static void ahci_shutdown(AHCIQState *ahci)
  * Boot and fully enable the HBA device.
  * @see ahci_boot, ahci_pci_enable and ahci_hba_enable.
  */
-static AHCIQState *ahci_boot_and_enable(void)
+static AHCIQState *ahci_boot_and_enable(const char *cli, ...)
 {
     AHCIQState *ahci;
-    ahci = ahci_boot();
+    va_list ap;
+
+    if (cli) {
+        va_start(ap, cli);
+        ahci = ahci_vboot(cli, ap);
+        va_end(ap);
+    } else {
+        ahci = ahci_boot(NULL);
+    }
 
     ahci_pci_enable(ahci);
     ahci_hba_enable(ahci);
@@ -807,7 +831,7 @@ static void ahci_test_flush(AHCIQState *ahci)
 static void test_sanity(void)
 {
     AHCIQState *ahci;
-    ahci = ahci_boot();
+    ahci = ahci_boot(NULL);
     ahci_shutdown(ahci);
 }
 
@@ -818,7 +842,7 @@ static void test_sanity(void)
 static void test_pci_spec(void)
 {
     AHCIQState *ahci;
-    ahci = ahci_boot();
+    ahci = ahci_boot(NULL);
     ahci_test_pci_spec(ahci);
     ahci_shutdown(ahci);
 }
@@ -830,8 +854,7 @@ static void test_pci_spec(void)
 static void test_pci_enable(void)
 {
     AHCIQState *ahci;
-
-    ahci = ahci_boot();
+    ahci = ahci_boot(NULL);
     ahci_pci_enable(ahci);
     ahci_shutdown(ahci);
 }
@@ -844,7 +867,7 @@ static void test_hba_spec(void)
 {
     AHCIQState *ahci;
 
-    ahci = ahci_boot();
+    ahci = ahci_boot(NULL);
     ahci_pci_enable(ahci);
     ahci_test_hba_spec(ahci);
     ahci_shutdown(ahci);
@@ -858,7 +881,7 @@ static void test_hba_enable(void)
 {
     AHCIQState *ahci;
 
-    ahci = ahci_boot();
+    ahci = ahci_boot(NULL);
     ahci_pci_enable(ahci);
     ahci_hba_enable(ahci);
     ahci_shutdown(ahci);
@@ -872,7 +895,7 @@ static void test_identify(void)
 {
     AHCIQState *ahci;
 
-    ahci = ahci_boot_and_enable();
+    ahci = ahci_boot_and_enable(NULL);
     ahci_test_identify(ahci);
     ahci_shutdown(ahci);
 }
@@ -894,7 +917,7 @@ static void test_dma_fragmented(void)
     unsigned i;
     uint64_t ptr;
 
-    ahci = ahci_boot_and_enable();
+    ahci = ahci_boot_and_enable(NULL);
     px = ahci_port_select(ahci);
     ahci_port_clear(ahci, px);
 
@@ -938,7 +961,7 @@ static void test_flush(void)
 {
     AHCIQState *ahci;
 
-    ahci = ahci_boot_and_enable();
+    ahci = ahci_boot_and_enable(NULL);
     ahci_test_flush(ahci);
     ahci_shutdown(ahci);
 }
@@ -1053,7 +1076,7 @@ static void test_io_rw_interface(enum AddrMode lba48, enum IOMode dma,
 {
     AHCIQState *ahci;
 
-    ahci = ahci_boot_and_enable();
+    ahci = ahci_boot_and_enable(NULL);
     ahci_test_io_rw_simple(ahci, bufsize, sector,
                            io_cmds[dma][lba48][IO_READ],
                            io_cmds[dma][lba48][IO_WRITE]);
