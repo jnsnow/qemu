@@ -61,3 +61,40 @@ void qtest_shutdown(QOSState *qs)
     qtest_quit(qs->qts);
     g_free(qs);
 }
+
+void mkimg(const char *file, const char *fmt, unsigned size_mb)
+{
+    gchar *cli;
+    bool ret;
+    int rc;
+    GError *err = NULL;
+    char *qemu_img_path;
+    gchar *out, *out2;
+
+    qemu_img_path = getenv("QTEST_QEMU_IMG");
+    assert(qemu_img_path);
+
+    cli = g_strdup_printf("./%s create -f %s %s %uM", qemu_img_path,
+                          fmt, file, size_mb);
+    ret = g_spawn_command_line_sync(cli, &out, &out2, &rc, &err);
+    if (err) {
+        fprintf(stderr, "%s\n", err->message);
+        g_error_free(err);
+    }
+    g_assert(ret && !err);
+
+    ret = g_spawn_check_exit_status(rc, &err);
+    if (err) {
+        fprintf(stderr, "%s\n", err->message);
+    }
+    g_assert(ret && !err);
+
+    g_free(out);
+    g_free(out2);
+    g_free(cli);
+}
+
+void mkqcow2(const char *file, unsigned size_mb)
+{
+    return mkimg(file, "qcow2", size_mb);
+}
