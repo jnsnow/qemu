@@ -135,7 +135,11 @@ class TestIncrementalBackup(iotests.QMPTestCase):
                              mode='existing')
         self.assert_qmp(result, 'return', {})
 
-        event = self.wait_until_completed(bitmap.node, check_offset=validate)
+        event = self.wait_until_completed(bitmap.node, check_offset=validate,
+                                          allow_failures=(not validate))
+        if 'error' in event['data']:
+            bitmap.del_target()
+            return False
         if validate:
             return self.check_incremental(target)
 
@@ -178,6 +182,57 @@ class TestIncrementalBackup(iotests.QMPTestCase):
                                       ('0x78', '15872k', '1M')))
         self.create_incremental()
         return True
+
+
+    def test_incremental_failure(self):
+        '''Test: Verify backups made after a failure are correct.
+
+        Simulate a failure during an incremental backup block job,
+        emulate additional writes, then create another incremental backup
+        afterwards and verify that the backup created is correct.
+        '''
+
+        # Create a blkdebug interface to this img as 'drive1'
+        result = self.vm.qmp('blockdev-add', options={
+            'id': 'drive1',
+            'driver': iotests.imgfmt,
+            'file': {
+                'driver': 'blkdebug',
+                'image': {
+                    'driver': 'file',
+                    'filename': self.test_img
+                },
+                'set-state': [{
+                    'event': 'flush_to_disk',
+                    'state': 1,
+                    'new_state': 2
+                }],
+                'inject-error': [{
+                    'event': 'read_aio',
+                    'errno': 5,
+                    'state': 2,
+                    'immediately': False,
+                    'once': True
+                }],
+            }
+        })
+        self.assert_qmp(result, 'return', {})
+
+        self.create_full_backup()
+        self.add_bitmap('bitmap0', 'drive1')
+        # Note: at this point, during a normal execution,
+        # Assume that the VM resumes and begins issuing IO requests here.
+
+        self.hmp_io_writes('drive1', (('0xab', 0, 512),
+                                      ('0xfe', '16M', '256k'),
+                                      ('0x64', '32736k', '64k')))
+
+        result = self.create_incremental(validate=False)
+        self.assertFalse(result)
+        self.hmp_io_writes('drive1', (('0x9a', 0, 512),
+                                      ('0x55', '8M', '352k'),
+                                      ('0x78', '15872k', '1M')))
+        self.create_incremental()
 
 
     def test_sync_dirty_bitmap_missing(self):
