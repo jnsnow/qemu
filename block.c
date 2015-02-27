@@ -5602,6 +5602,8 @@ BlockDirtyInfoList *bdrv_query_dirty_bitmaps(BlockDriverState *bs)
         info->granularity = bdrv_dirty_bitmap_granularity(bm);
         info->has_name = !!bm->name;
         info->name = g_strdup(bm->name);
+        info->disabled = bm->disabled;
+        info->frozen = bdrv_dirty_bitmap_frozen(bm);
         entry->value = info;
         *plist = entry;
         plist = &entry->next;
