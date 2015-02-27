@@ -51,8 +51,17 @@
 #include <windows.h>
 #endif
 
+/**
+ * A BdrvDirtyBitmap can be in three possible states:
+ * (1) successor is false and disabled is false: full r/w mode
+ * (2) successor is false and disabled is true: read only mode ("disabled")
+ * (3) successor is set: frozen mode.
+ *     A frozen bitmap cannot be renamed, deleted, anonymized, cleared, set,
+ *     or enabled. A frozen bitmap can only abdicate() or reclaim().
+ */
 struct BdrvDirtyBitmap {
     HBitmap *bitmap;
+    BdrvDirtyBitmap *successor;
     char *name;
     bool disabled;
     QLIST_ENTRY(BdrvDirtyBitmap) list;
@@ -5421,6 +5430,7 @@ BdrvDirtyBitmap *bdrv_find_dirty_bitmap(BlockDriverState *bs, const char *name)
 
 void bdrv_dirty_bitmap_make_anon(BlockDriverState *bs, BdrvDirtyBitmap *bitmap)
 {
+    assert(!bdrv_dirty_bitmap_frozen(bitmap));
     g_free(bitmap->name);
     bitmap->name = NULL;
 }
@@ -5456,9 +5466,98 @@ BdrvDirtyBitmap *bdrv_create_dirty_bitmap(BlockDriverState *bs,
     return bitmap;
 }
 
+bool bdrv_dirty_bitmap_frozen(BdrvDirtyBitmap *bitmap)
+{
+    return bitmap->successor;
+}
+
 bool bdrv_dirty_bitmap_enabled(BdrvDirtyBitmap *bitmap)
 {
-    return !bitmap->disabled;
+    return !(bitmap->disabled || bitmap->successor);
+}
+
+/**
+ * Create a successor bitmap destined to replace this bitmap after an operation.
+ * Requires that the bitmap is not frozen and has no successor.
+ */
+int bdrv_dirty_bitmap_create_successor(BlockDriverState *bs,
+                                       BdrvDirtyBitmap *bitmap, Error **errp)
+{
+    uint64_t granularity;
+    BdrvDirtyBitmap *child;
+
+    if (bdrv_dirty_bitmap_frozen(bitmap)) {
+        error_setg(errp, "Cannot create a successor for a bitmap that is "
+                   "currently frozen");
+        return -1;
+    }
+    assert(!bitmap->successor);
+
+    /* Create an anonymous successor */
+    granularity = bdrv_dirty_bitmap_granularity(bitmap);
+    child = bdrv_create_dirty_bitmap(bs, granularity, NULL, errp);
+    if (!child) {
+        return -1;
+    }
+
+    /* Successor will be on or off based on our current state. */
+    child->disabled = bitmap->disabled;
+
+    /* Install the successor and freeze the parent */
+    bitmap->successor = child;
+    return 0;
+}
+
+/**
+ * For a bitmap with a successor, yield our name to the successor,
+ * Delete the old bitmap, and return a handle to the new bitmap.
+ */
+BdrvDirtyBitmap *bdrv_dirty_bitmap_abdicate(BlockDriverState *bs,
+                                            BdrvDirtyBitmap *bitmap,
+                                            Error **errp)
+{
+    char *name;
+    BdrvDirtyBitmap *successor = bitmap->successor;
+
+    if (successor == NULL) {
+        error_setg(errp, "Cannot relinquish control if "
+                   "there's no successor present");
+        return NULL;
+    }
+
+    name = bitmap->name;
+    bitmap->name = NULL;
+    successor->name = name;
+    bitmap->successor = NULL;
+    bdrv_release_dirty_bitmap(bs, bitmap);
+
+    return successor;
+}
+
+/**
+ * In cases of failure where we can no longer safely delete the parent,
+ * We may wish to re-join the parent and child/successor.
+ * The merged parent will be un-frozen, but not explicitly re-enabled.
+ */
+BdrvDirtyBitmap *bdrv_reclaim_dirty_bitmap(BlockDriverState *bs,
+                                           BdrvDirtyBitmap *parent,
+                                           Error **errp)
+{
+    BdrvDirtyBitmap *successor = parent->successor;
+
+    if (!successor) {
+        error_setg(errp, "Cannot reclaim a successor when none is present");
+        return NULL;
+    }
+
+    if (!hbitmap_merge(parent->bitmap, successor->bitmap)) {
+        error_setg(errp, "Merging of parent and successor bitmap failed");
+        return NULL;
+    }
+    bdrv_release_dirty_bitmap(bs, successor);
+    parent->successor = NULL;
+
+    return parent;
 }
 
 void bdrv_release_dirty_bitmap(BlockDriverState *bs, BdrvDirtyBitmap *bitmap)
@@ -5466,6 +5565,7 @@ void bdrv_release_dirty_bitmap(BlockDriverState *bs, BdrvDirtyBitmap *bitmap)
     BdrvDirtyBitmap *bm, *next;
     QLIST_FOREACH_SAFE(bm, &bs->dirty_bitmaps, list, next) {
         if (bm == bitmap) {
+            assert(!bdrv_dirty_bitmap_frozen(bm));
             QLIST_REMOVE(bitmap, list);
             hbitmap_free(bitmap->bitmap);
             g_free(bitmap->name);
@@ -5477,11 +5577,13 @@ void bdrv_release_dirty_bitmap(BlockDriverState *bs, BdrvDirtyBitmap *bitmap)
 
 void bdrv_disable_dirty_bitmap(BdrvDirtyBitmap *bitmap)
 {
+    assert(!bdrv_dirty_bitmap_frozen(bitmap));
     bitmap->disabled = true;
 }
 
 void bdrv_enable_dirty_bitmap(BdrvDirtyBitmap *bitmap)
 {
+    assert(!bdrv_dirty_bitmap_frozen(bitmap));
     bitmap->disabled = false;
 }
 
