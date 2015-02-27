@@ -28,6 +28,36 @@ def io_write_patterns(img, patterns):
     for pattern in patterns:
         iotests.qemu_io('-c', 'write -P%s %s %s' % pattern, img)
 
+class Bitmap:
+    def __init__(self, name, node):
+        self.name = name
+        self.node = node
+        self.pattern = os.path.join(iotests.test_dir.replace('%', '%%'),
+                                    '%s.backup.%%i.img' % name)
+        self.num = 0
+        self.backups = list()
+
+    def new_target(self, num=None):
+        if num is None:
+            num = self.num
+        self.num = num + 1
+        target = self.pattern % num
+        self.backups.append(target)
+        return target
+
+    def last_target(self):
+        return self.backups[-1]
+
+    def del_target(self):
+        os.remove(self.backups.pop())
+        self.num -= 1
+
+    def __del__(self):
+        for backup in self.backups:
+            try:
+                os.remove(backup)
+            except OSError:
+                pass
 
 class TestIncrementalBackup(iotests.QMPTestCase):
     def setUp(self):
@@ -57,6 +87,98 @@ class TestIncrementalBackup(iotests.QMPTestCase):
         else:
             iotests.qemu_img('create', '-f', fmt, img, size)
         self.files.append(img)
+
+
+    def create_full_backup(self, drive='drive0'):
+        res = self.vm.qmp('drive-backup', device=drive,
+                          sync='full', format=iotests.imgfmt,
+                          target=self.full_bak)
+        self.assert_qmp(res, 'return', {})
+        self.wait_until_completed(drive)
+        self.check_full_backup()
+        self.files.append(self.full_bak)
+
+
+    def check_full_backup(self):
+        self.assertTrue(iotests.compare_images(self.test_img, self.full_bak))
+
+
+    def add_bitmap(self, name, node='drive0'):
+        bitmap = Bitmap(name, node)
+        self.bitmaps.append(bitmap)
+        result = self.vm.qmp('block-dirty-bitmap-add', node=bitmap.node,
+                             name=bitmap.name)
+        self.assert_qmp(result, 'return', {})
+        return bitmap
+
+
+    def create_incremental(self, bitmap=None, num=None,
+                           parent=None, parentFormat=None, validate=True):
+        if bitmap is None:
+            bitmap = self.bitmaps[-1]
+
+        # If this is the first incremental backup for a bitmap,
+        # use the full backup as a backing image. Otherwise, use
+        # the last incremental backup.
+        if parent is None:
+            if bitmap.num == 0:
+                parent = self.full_bak
+            else:
+                parent = bitmap.last_target()
+
+        target = bitmap.new_target(num)
+        self.img_create(target, iotests.imgfmt, parent=parent)
+
+        result = self.vm.qmp('drive-backup', device=bitmap.node,
+                             sync='dirty-bitmap', bitmap=bitmap.name,
+                             format=iotests.imgfmt, target=target,
+                             mode='existing')
+        self.assert_qmp(result, 'return', {})
+
+        event = self.wait_until_completed(bitmap.node, check_offset=validate)
+        if validate:
+            return self.check_incremental(target)
+
+
+    def check_incremental(self, target=None):
+        if target is None:
+            target = self.bitmaps[-1].last_target()
+        self.assertTrue(iotests.compare_images(self.test_img, target))
+        return True
+
+
+    def hmp_io_writes(self, drive, patterns):
+        for pattern in patterns:
+            self.vm.hmp_qemu_io(drive, 'write -P%s %s %s' % pattern)
+        self.vm.hmp_qemu_io(drive, 'flush')
+
+
+    def test_incremental_simple(self):
+        '''
+        Test: Create and verify three incremental backups.
+
+        Create a bitmap and a full backup before VM execution begins,
+        then create a series of three incremental backups "during execution,"
+        i.e.; after IO requests begin modifying the drive.
+        '''
+        self.create_full_backup()
+        self.add_bitmap('bitmap0', 'drive0')
+
+        # Sanity: Create a "hollow" incremental backup
+        self.create_incremental()
+        # Three writes: One complete overwrite, one new segment,
+        # and one partial overlap.
+        self.hmp_io_writes('drive0', (('0xab', 0, 512),
+                                      ('0xfe', '16M', '256k'),
+                                      ('0x64', '32736k', '64k')))
+        self.create_incremental()
+        # Three more writes, one of each kind, like above
+        self.hmp_io_writes('drive0', (('0x9a', 0, 512),
+                                      ('0x55', '8M', '352k'),
+                                      ('0x78', '15872k', '1M')))
+        self.create_incremental()
+        return True
+
 
     def test_sync_dirty_bitmap_missing(self):
         self.assert_no_active_block_jobs()
