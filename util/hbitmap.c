@@ -90,6 +90,9 @@ struct HBitmap {
      * bitmap will still allocate HBITMAP_LEVELS arrays.
      */
     unsigned long *levels[HBITMAP_LEVELS];
+
+    /* The length of each levels[] array. */
+    uint64_t sizes[HBITMAP_LEVELS];
 };
 
 /* Advance hbi to the next nonzero word and return it.  hbi->pos
@@ -384,6 +387,7 @@ HBitmap *hbitmap_alloc(uint64_t size, int granularity)
     hb->granularity = granularity;
     for (i = HBITMAP_LEVELS; i-- > 0; ) {
         size = MAX((size + BITS_PER_LONG - 1) >> BITS_PER_LEVEL, 1);
+        hb->sizes[i] = size;
         hb->levels[i] = g_new0(unsigned long, size);
     }
 
@@ -395,6 +399,57 @@ HBitmap *hbitmap_alloc(uint64_t size, int granularity)
     hb->levels[0][0] |= 1UL << (BITS_PER_LONG - 1);
     return hb;
 }
+
+void hbitmap_truncate(HBitmap *hb, uint64_t size)
+{
+    bool truncate;
+    unsigned i;
+    uint64_t num_elements = size;
+    uint64_t old;
+
+    /* Size comes in as logical elements, adjust for granularity. */
+    size = (size + (1ULL << hb->granularity) - 1) >> hb->granularity;
+    assert(size <= ((uint64_t)1 << HBITMAP_LOG_MAX_SIZE));
+    truncate = size < hb->size;
+
+    if (size == hb->size) {
+        /* A hard day's work */
+        return;
+    }
+
+    hb->size = size;
+    for (i = HBITMAP_LEVELS; i-- > 0; ) {
+        size = MAX((size + BITS_PER_LONG - 1) >> BITS_PER_LEVEL, 1);
+        if (hb->sizes[i] == size) {
+            continue;
+        }
+        old = hb->sizes[i];
+        hb->sizes[i] = size;
+        hb->levels[i] = g_realloc_n(hb->levels[i], size, sizeof(unsigned long));
+        if (!truncate) {
+            memset(&hb->levels[i][old], 0x00,
+                   (size - old) * sizeof(*hb->levels[i]));
+        }
+    }
+    assert(size == 1);
+
+    /* Clear out any "extra space" we may have that the user didn't request:
+     * It may have garbage data in it, now. */
+    if (truncate) {
+        /* Due to granularity fuzziness, we may accidentally reset some of
+         * the last bits that are actually valid. So, record the current value,
+         * reset the "dead range," then re-set the one element we care about. */
+        uint64_t fix_count = (hb->size << hb->granularity) - num_elements;
+        if (fix_count) {
+            bool set = hbitmap_get(hb, num_elements - 1);
+            hbitmap_reset(hb, num_elements, fix_count);
+            if (set) {
+                hbitmap_set(hb, num_elements - 1, 1);
+            }
+        }
+    }
+}
+
 
 /**
  * Given HBitmaps A and B, let A := A (BITOR) B.

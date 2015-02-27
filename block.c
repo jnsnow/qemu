@@ -3543,6 +3543,7 @@ int bdrv_truncate(BlockDriverState *bs, int64_t offset)
     ret = drv->bdrv_truncate(bs, offset);
     if (ret == 0) {
         ret = refresh_total_sectors(bs, offset >> BDRV_SECTOR_BITS);
+        bdrv_dirty_bitmap_truncate(bs);
         if (bs->blk) {
             blk_dev_resize_cb(bs->blk);
         }
@@ -5560,6 +5561,27 @@ BdrvDirtyBitmap *bdrv_reclaim_dirty_bitmap(BlockDriverState *bs,
     parent->successor = NULL;
 
     return parent;
+}
+
+static void dirty_bitmap_truncate(BdrvDirtyBitmap *bitmap, uint64_t size)
+{
+    /* Should only be frozen during a block backup job, which should have
+     * blocked any resize actions. */
+    assert(!bdrv_dirty_bitmap_frozen(bitmap));
+    hbitmap_truncate(bitmap->bitmap, size);
+}
+
+void bdrv_dirty_bitmap_truncate(BlockDriverState *bs)
+{
+    BdrvDirtyBitmap *bitmap;
+    uint64_t size = bdrv_nb_sectors(bs);
+
+    QLIST_FOREACH(bitmap, &bs->dirty_bitmaps, list) {
+        if (bdrv_dirty_bitmap_frozen(bitmap)) {
+            continue;
+        }
+        dirty_bitmap_truncate(bitmap, size);
+    }
 }
 
 void bdrv_release_dirty_bitmap(BlockDriverState *bs, BdrvDirtyBitmap *bitmap)
