@@ -1162,6 +1162,48 @@ out_aio_context:
     return NULL;
 }
 
+/**
+ * Return a dirty bitmap (if present), after validating
+ * the node reference and bitmap names. Returns NULL on error,
+ * including when the BDS and/or bitmap is not found.
+ */
+static BdrvDirtyBitmap *block_dirty_bitmap_lookup(const char *node,
+                                                  const char *name,
+                                                  BlockDriverState **pbs,
+                                                  Error **errp)
+{
+    BlockDriverState *bs;
+    BdrvDirtyBitmap *bitmap;
+
+    if (!node) {
+        error_setg(errp, "Node cannot be NULL");
+        return NULL;
+    }
+    if (!name) {
+        error_setg(errp, "Bitmap name cannot be NULL");
+        return NULL;
+    }
+
+    bs = bdrv_lookup_bs(node, node, NULL);
+    if (!bs) {
+        error_setg(errp, "Node '%s' not found", node);
+        return NULL;
+    }
+
+    /* If caller provided a BDS*, provide the result of that lookup, too. */
+    if (pbs) {
+        *pbs = bs;
+    }
+
+    bitmap = bdrv_find_dirty_bitmap(bs, name);
+    if (!bitmap) {
+        error_setg(errp, "Dirty bitmap '%s' not found", name);
+        return NULL;
+    }
+
+    return bitmap;
+}
+
 /* New and old BlockDriverState structs for atomic group operations */
 
 typedef struct BlkTransactionState BlkTransactionState;
@@ -1938,6 +1980,64 @@ void qmp_block_set_io_throttle(const char *device, int64_t bps, int64_t bps_rd,
     if (bs->io_limits_enabled) {
         bdrv_set_io_limits(bs, &cfg);
     }
+
+    aio_context_release(aio_context);
+}
+
+void qmp_block_dirty_bitmap_add(const char *node, const char *name,
+                                bool has_granularity, uint32_t granularity,
+                                Error **errp)
+{
+    AioContext *aio_context;
+    BlockDriverState *bs;
+
+    if (!name || name[0] == '\0') {
+        error_setg(errp, "Bitmap name cannot be empty");
+        return;
+    }
+
+    bs = bdrv_lookup_bs(node, node, errp);
+    if (!bs) {
+        return;
+    }
+
+    aio_context = bdrv_get_aio_context(bs);
+    aio_context_acquire(aio_context);
+
+    if (has_granularity) {
+        if (granularity < 512 || !is_power_of_2(granularity)) {
+            error_setg(errp, "Granularity must be power of 2 "
+                             "and at least 512");
+            goto out;
+        }
+    } else {
+        /* Default to cluster size, if available: */
+        granularity = bdrv_get_default_bitmap_granularity(bs);
+    }
+
+    bdrv_create_dirty_bitmap(bs, granularity, name, errp);
+
+ out:
+    aio_context_release(aio_context);
+}
+
+void qmp_block_dirty_bitmap_remove(const char *node, const char *name,
+                                   Error **errp)
+{
+    AioContext *aio_context;
+    BlockDriverState *bs;
+    BdrvDirtyBitmap *bitmap;
+
+    bitmap = block_dirty_bitmap_lookup(node, name, &bs, errp);
+    if (!bitmap || !bs) {
+        return;
+    }
+
+    aio_context = bdrv_get_aio_context(bs);
+    aio_context_acquire(aio_context);
+
+    bdrv_dirty_bitmap_make_anon(bs, bitmap);
+    bdrv_release_dirty_bitmap(bs, bitmap);
 
     aio_context_release(aio_context);
 }
