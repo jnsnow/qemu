@@ -35,6 +35,19 @@
 #include "qemu/timer.h"
 #include "qapi-event.h"
 
+void block_job_incref(BlockJob *job)
+{
+    job->refcount++;
+}
+
+void block_job_decref(BlockJob *job)
+{
+    job->refcount--;
+    if (job->refcount == 0) {
+        g_free(job);
+    }
+}
+
 void *block_job_create(const BlockJobDriver *driver, BlockDriverState *bs,
                        int64_t speed, BlockCompletionFunc *cb,
                        void *opaque, Error **errp)
@@ -57,6 +70,7 @@ void *block_job_create(const BlockJobDriver *driver, BlockDriverState *bs,
     job->cb            = cb;
     job->opaque        = opaque;
     job->busy          = true;
+    job->refcount      = 1;
     bs->job = job;
 
     /* Only set speed when necessary to avoid NotSupported error */
@@ -68,7 +82,7 @@ void *block_job_create(const BlockJobDriver *driver, BlockDriverState *bs,
             bs->job = NULL;
             bdrv_op_unblock_all(bs, job->blocker);
             error_free(job->blocker);
-            g_free(job);
+            block_job_decref(job);
             error_propagate(errp, local_err);
             return NULL;
         }
@@ -85,7 +99,7 @@ void block_job_completed(BlockJob *job, int ret)
     bs->job = NULL;
     bdrv_op_unblock_all(bs, job->blocker);
     error_free(job->blocker);
-    g_free(job);
+    block_job_decref(job);
 }
 
 void block_job_set_speed(BlockJob *job, int64_t speed, Error **errp)

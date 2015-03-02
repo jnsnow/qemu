@@ -116,6 +116,9 @@ struct BlockJob {
 
     /** The opaque value that is passed to the completion function.  */
     void *opaque;
+
+    /** A reference count, allowing for post-job actions in e.g. transactions */
+    int refcount;
 };
 
 /**
@@ -139,6 +142,24 @@ struct BlockJob {
 void *block_job_create(const BlockJobDriver *driver, BlockDriverState *bs,
                        int64_t speed, BlockCompletionFunc *cb,
                        void *opaque, Error **errp);
+
+/**
+ * block_job_incref:
+ * @job: The job to pick up a handle to
+ *
+ * Increment the refcount on @job, to be able to use it asynchronously
+ * from the job it is being used for. Put down the reference when done
+ * with @block_job_unref
+ */
+void block_job_incref(BlockJob *job);
+
+/**
+ * block_job_decref:
+ * @job: The job to unreference and delete.
+ *
+ * Decrement the refcount on @job, and delete it if there are no users.
+ */
+void block_job_decref(BlockJob *job);
 
 /**
  * block_job_sleep_ns:
