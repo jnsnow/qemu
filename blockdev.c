@@ -1664,6 +1664,96 @@ static void blockdev_backup_clean(BlkTransactionState *common)
     }
 }
 
+typedef struct BlockDirtyBitmapState {
+    BlkTransactionState common;
+    BdrvDirtyBitmap *bitmap;
+    BlockDriverState *bs;
+    AioContext *aio_context;
+    bool prepared;
+} BlockDirtyBitmapState;
+
+static void block_dirty_bitmap_add_prepare(BlkTransactionState *common,
+                                           Error **errp)
+{
+    Error *local_err = NULL;
+    BlockDirtyBitmapAdd *action;
+    BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
+                                             common, common);
+
+    action = common->action->block_dirty_bitmap_add;
+    /* AIO context taken within qmp_block_dirty_bitmap_add */
+    qmp_block_dirty_bitmap_add(action->node, action->name,
+                               action->has_granularity, action->granularity,
+                               &local_err);
+
+    if (!local_err) {
+        state->prepared = true;
+    } else {
+        error_propagate(errp, local_err);
+    }
+}
+
+static void block_dirty_bitmap_add_abort(BlkTransactionState *common)
+{
+    BlockDirtyBitmapAdd *action;
+   BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
+                                             common, common);
+
+    action = common->action->block_dirty_bitmap_add;
+    /* Should not be able to fail: IF the bitmap was added via .prepare(),
+     * then the node reference and bitmap name must have been valid.
+     */
+    if (state->prepared) {
+        qmp_block_dirty_bitmap_remove(action->node, action->name, &error_abort);
+    }
+}
+
+static void block_dirty_bitmap_clear_prepare(BlkTransactionState *common,
+                                             Error **errp)
+{
+    BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
+                                             common, common);
+    BlockDirtyBitmap *action;
+
+    action = common->action->block_dirty_bitmap_clear;
+    state->bitmap = block_dirty_bitmap_lookup(action->node,
+                                              action->name,
+                                              &state->bs,
+                                              errp);
+    if (!state->bitmap) {
+        return;
+    }
+
+    if (bdrv_dirty_bitmap_frozen(state->bitmap)) {
+        error_setg(errp, "Cannot modify a frozen bitmap");
+        return;
+    } else if (!bdrv_dirty_bitmap_enabled(state->bitmap)) {
+        error_setg(errp, "Cannot clear a disabled bitmap");
+        return;
+    }
+
+    /* AioContext is released in .clean() */
+    state->aio_context = bdrv_get_aio_context(state->bs);
+    aio_context_acquire(state->aio_context);
+}
+
+static void block_dirty_bitmap_clear_commit(BlkTransactionState *common)
+{
+    BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
+                                             common, common);
+    bdrv_clear_dirty_bitmap(state->bitmap);
+}
+
+static void block_dirty_bitmap_clear_clean(BlkTransactionState *common)
+{
+    BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
+                                             common, common);
+
+    if (state->aio_context) {
+        aio_context_release(state->aio_context);
+    }
+}
+
 static void abort_prepare(BlkTransactionState *common, Error **errp)
 {
     error_setg(errp, "Transaction aborted using Abort action");
@@ -1704,6 +1794,17 @@ static const BdrvActionOps actions[] = {
         .abort = internal_snapshot_abort,
         .clean = internal_snapshot_clean,
     },
+    [TRANSACTION_ACTION_KIND_BLOCK_DIRTY_BITMAP_ADD] = {
+        .instance_size = sizeof(BlockDirtyBitmapState),
+        .prepare = block_dirty_bitmap_add_prepare,
+        .abort = block_dirty_bitmap_add_abort,
+    },
+    [TRANSACTION_ACTION_KIND_BLOCK_DIRTY_BITMAP_CLEAR] = {
+        .instance_size = sizeof(BlockDirtyBitmapState),
+        .prepare = block_dirty_bitmap_clear_prepare,
+        .commit = block_dirty_bitmap_clear_commit,
+        .clean = block_dirty_bitmap_clear_clean,
+    }
 };
 
 /*
