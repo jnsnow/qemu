@@ -1449,6 +1449,19 @@ void undo_transaction_wrapper(BlkTransactionState *common)
     blk_put_transaction_state(common);
 }
 
+static void _drive_backup(const char *device, const char *target,
+                          bool has_format, const char *format,
+                          enum MirrorSyncMode sync,
+                          bool has_mode, enum NewImageMode mode,
+                          bool has_speed, int64_t speed,
+                          bool has_bitmap, const char *bitmap,
+                          bool has_on_source_error,
+                          BlockdevOnError on_source_error,
+                          bool has_on_target_error,
+                          BlockdevOnError on_target_error,
+                          BlockCompletionFunc *cb, void *opaque,
+                          Error **errp);
+
 /* internal snapshot private data */
 typedef struct InternalSnapshotState {
     BlkTransactionState common;
@@ -1768,15 +1781,16 @@ static void drive_backup_prepare(BlkTransactionState *common, Error **errp)
     state->aio_context = bdrv_get_aio_context(bs);
     aio_context_acquire(state->aio_context);
 
-    qmp_drive_backup(backup->device, backup->target,
-                     backup->has_format, backup->format,
-                     backup->sync,
-                     backup->has_mode, backup->mode,
-                     backup->has_speed, backup->speed,
-                     backup->has_bitmap, backup->bitmap,
-                     backup->has_on_source_error, backup->on_source_error,
-                     backup->has_on_target_error, backup->on_target_error,
-                     &local_err);
+    _drive_backup(backup->device, backup->target,
+                  backup->has_format, backup->format,
+                  backup->sync,
+                  backup->has_mode, backup->mode,
+                  backup->has_speed, backup->speed,
+                  backup->has_bitmap, backup->bitmap,
+                  backup->has_on_source_error, backup->on_source_error,
+                  backup->has_on_target_error, backup->on_target_error,
+                  NULL, NULL,
+                  &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         return;
@@ -2717,15 +2731,18 @@ out:
     aio_context_release(aio_context);
 }
 
-void qmp_drive_backup(const char *device, const char *target,
-                      bool has_format, const char *format,
-                      enum MirrorSyncMode sync,
-                      bool has_mode, enum NewImageMode mode,
-                      bool has_speed, int64_t speed,
-                      bool has_bitmap, const char *bitmap,
-                      bool has_on_source_error, BlockdevOnError on_source_error,
-                      bool has_on_target_error, BlockdevOnError on_target_error,
-                      Error **errp)
+static void _drive_backup(const char *device, const char *target,
+                          bool has_format, const char *format,
+                          enum MirrorSyncMode sync,
+                          bool has_mode, enum NewImageMode mode,
+                          bool has_speed, int64_t speed,
+                          bool has_bitmap, const char *bitmap,
+                          bool has_on_source_error,
+                          BlockdevOnError on_source_error,
+                          bool has_on_target_error,
+                          BlockdevOnError on_target_error,
+                          BlockCompletionFunc *cb, void *opaque,
+                          Error **errp)
 {
     BlockDriverState *bs;
     BlockDriverState *target_bs;
@@ -2837,9 +2854,15 @@ void qmp_drive_backup(const char *device, const char *target,
         }
     }
 
+    if (cb == NULL) {
+        cb = block_job_cb;
+    }
+    if (opaque == NULL) {
+        opaque = bs;
+    }
     backup_start(bs, target_bs, speed, sync, bmap,
                  on_source_error, on_target_error,
-                 block_job_cb, bs, &local_err);
+                 cb, opaque, &local_err);
     if (local_err != NULL) {
         bdrv_unref(target_bs);
         error_propagate(errp, local_err);
@@ -2848,6 +2871,22 @@ void qmp_drive_backup(const char *device, const char *target,
 
 out:
     aio_context_release(aio_context);
+}
+
+void qmp_drive_backup(const char *device, const char *target,
+                      bool has_format, const char *format,
+                      enum MirrorSyncMode sync,
+                      bool has_mode, enum NewImageMode mode,
+                      bool has_speed, int64_t speed,
+                      bool has_bitmap, const char *bitmap,
+                      bool has_on_source_error, BlockdevOnError on_source_error,
+                      bool has_on_target_error, BlockdevOnError on_target_error,
+                      Error **errp)
+{
+    _drive_backup(device, target, has_format, format, sync, has_mode, mode,
+                  has_speed, speed, has_bitmap, bitmap, has_on_source_error,
+                  on_source_error, has_on_target_error, on_target_error,
+                  NULL, NULL, errp);
 }
 
 BlockDeviceInfoList *qmp_query_named_block_nodes(Error **errp)
