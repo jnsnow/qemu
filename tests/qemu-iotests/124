@@ -100,7 +100,6 @@ class TestIncrementalBackup(iotests.QMPTestCase):
 
     def img_create(self, img, fmt=iotests.imgfmt, size='64M',
                    parent=None, parentFormat=None):
-        plist = list()
         if parent:
             if parentFormat is None:
                 parentFormat = fmt
@@ -140,17 +139,25 @@ class TestIncrementalBackup(iotests.QMPTestCase):
         return bitmap
 
 
-    def create_incremental(self, bitmap=None, num=None,
-                           parent=None, parentFormat=None, validate=True):
+    def prepare_backup(self, bitmap=None, parent=None):
         if bitmap is None:
             bitmap = self.bitmaps[-1]
-
         if parent is None:
             parent = bitmap.last_target()
 
-        target = bitmap.new_target(num)
+        target = bitmap.new_target()
         self.img_create(target, bitmap.drive['fmt'], parent=parent)
+        return target
 
+
+    def create_incremental(self, bitmap=None, parent=None,
+                           parentFormat=None, validate=True):
+        if bitmap is None:
+            bitmap = self.bitmaps[-1]
+        if parent is None:
+            parent = bitmap.last_target()
+
+        target = self.prepare_backup(bitmap, parent)
         result = self.vm.qmp('drive-backup', device=bitmap.drive['id'],
                              sync='dirty-bitmap', bitmap=bitmap.name,
                              format=bitmap.drive['fmt'], target=target,
