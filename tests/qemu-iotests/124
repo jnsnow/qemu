@@ -29,13 +29,17 @@ def io_write_patterns(img, patterns):
         iotests.qemu_io('-c', 'write -P%s %s %s' % pattern, img)
 
 class Bitmap:
-    def __init__(self, name, node):
+    def __init__(self, name, drive):
         self.name = name
-        self.node = node
+        self.drive = drive
         self.pattern = os.path.join(iotests.test_dir.replace('%', '%%'),
-                                    '%s.backup.%%i.img' % name)
+                                    '%s.%s.backup.%%i.img' % (drive['id'],
+                                                              name))
         self.num = 0
         self.backups = list()
+
+    def base_target(self):
+        return self.drive['backup']
 
     def new_target(self, num=None):
         if num is None:
@@ -46,7 +50,9 @@ class Bitmap:
         return target
 
     def last_target(self):
-        return self.backups[-1]
+        if self.backups:
+            return self.backups[-1]
+        return self.base_target()
 
     def del_target(self):
         os.remove(self.backups.pop())
@@ -63,17 +69,33 @@ class TestIncrementalBackup(iotests.QMPTestCase):
     def setUp(self):
         self.bitmaps = list()
         self.files = list()
+        self.drives = list()
         self.vm = iotests.VM()
-        self.test_img = os.path.join(iotests.test_dir, 'base.img')
-        self.full_bak = os.path.join(iotests.test_dir, 'backup.img')
-        self.foo_img = os.path.join(iotests.test_dir, 'foo.bar')
-        self.img_create(self.test_img, iotests.imgfmt)
-        self.vm.add_drive(self.test_img)
+        self.err_img = os.path.join(iotests.test_dir, 'err.%s' % iotests.imgfmt)
+
         # Create a base image with a distinctive patterning
-        io_write_patterns(self.test_img, (('0x41', 0, 512),
-                                          ('0xd5', '1M', '32k'),
-                                          ('0xdc', '32M', '124k')))
+        drive0 = self.add_node('drive0')
+        self.img_create(drive0['file'], drive0['fmt'])
+        self.vm.add_drive(drive0['file'])
+        io_write_patterns(drive0['file'], (('0x41', 0, 512),
+                                           ('0xd5', '1M', '32k'),
+                                           ('0xdc', '32M', '124k')))
         self.vm.launch()
+
+
+    def add_node(self, node_id, fmt=iotests.imgfmt, path=None, backup=None):
+        if path is None:
+            path = os.path.join(iotests.test_dir, '%s.%s' % (node_id, fmt))
+        if backup is None:
+            backup = os.path.join(iotests.test_dir,
+                                  '%s.full.backup.%s' % (node_id, fmt))
+
+        self.drives.append({
+            'id': node_id,
+            'file': path,
+            'backup': backup,
+            'fmt': fmt })
+        return self.drives[-1]
 
 
     def img_create(self, img, fmt=iotests.imgfmt, size='64M',
@@ -89,25 +111,31 @@ class TestIncrementalBackup(iotests.QMPTestCase):
         self.files.append(img)
 
 
-    def create_full_backup(self, drive='drive0'):
-        res = self.vm.qmp('drive-backup', device=drive,
-                          sync='full', format=iotests.imgfmt,
-                          target=self.full_bak)
+    def create_full_backup(self, drive=None):
+        if drive is None:
+            drive = self.drives[-1]
+
+        res = self.vm.qmp('drive-backup', device=drive['id'],
+                          sync='full', format=drive['fmt'],
+                          target=drive['backup'])
         self.assert_qmp(res, 'return', {})
-        self.wait_until_completed(drive)
-        self.check_full_backup()
-        self.files.append(self.full_bak)
+        self.wait_until_completed(drive['id'])
+        self.check_full_backup(drive)
+        self.files.append(drive['backup'])
+        return drive['backup']
 
 
-    def check_full_backup(self):
-        self.assertTrue(iotests.compare_images(self.test_img, self.full_bak))
+    def check_full_backup(self, drive=None):
+        if drive is None:
+            drive = self.drives[-1]
+        self.assertTrue(iotests.compare_images(drive['file'], drive['backup']))
 
 
-    def add_bitmap(self, name, node='drive0'):
-        bitmap = Bitmap(name, node)
+    def add_bitmap(self, name, drive):
+        bitmap = Bitmap(name, drive)
         self.bitmaps.append(bitmap)
-        result = self.vm.qmp('block-dirty-bitmap-add', node=bitmap.node,
-                             name=bitmap.name)
+        result = self.vm.qmp('block-dirty-bitmap-add', node=drive['id'],
+                             name=name)
         self.assert_qmp(result, 'return', {})
         return bitmap
 
@@ -117,37 +145,43 @@ class TestIncrementalBackup(iotests.QMPTestCase):
         if bitmap is None:
             bitmap = self.bitmaps[-1]
 
-        # If this is the first incremental backup for a bitmap,
-        # use the full backup as a backing image. Otherwise, use
-        # the last incremental backup.
         if parent is None:
-            if bitmap.num == 0:
-                parent = self.full_bak
-            else:
-                parent = bitmap.last_target()
+            parent = bitmap.last_target()
 
         target = bitmap.new_target(num)
-        self.img_create(target, iotests.imgfmt, parent=parent)
+        self.img_create(target, bitmap.drive['fmt'], parent=parent)
 
-        result = self.vm.qmp('drive-backup', device=bitmap.node,
+        result = self.vm.qmp('drive-backup', device=bitmap.drive['id'],
                              sync='dirty-bitmap', bitmap=bitmap.name,
-                             format=iotests.imgfmt, target=target,
+                             format=bitmap.drive['fmt'], target=target,
                              mode='existing')
         self.assert_qmp(result, 'return', {})
 
-        event = self.wait_until_completed(bitmap.node, check_offset=validate,
-                                          allow_failures=(not validate))
-        if 'error' in event['data']:
+        return self.wait_incremental(bitmap, validate)
+
+
+    def wait_incremental(self, bitmap=None,
+                         validate=True, error='Input/output error'):
+        if bitmap is None:
+            bitmap = self.bitmaps[-1]
+
+        event = self.vm.event_wait(name="BLOCK_JOB_COMPLETED",
+                                   match={'data': {'device':
+                                                   bitmap.drive['id']}})
+        if validate:
+            self.assert_qmp_absent(event, 'data/error')
+            return self.check_incremental(bitmap)
+        else:
+            self.assert_qmp(event, 'data/error', error)
             bitmap.del_target()
             return False
-        if validate:
-            return self.check_incremental(target)
 
 
-    def check_incremental(self, target=None):
-        if target is None:
-            target = self.bitmaps[-1].last_target()
-        self.assertTrue(iotests.compare_images(self.test_img, target))
+    def check_incremental(self, bitmap=None):
+        if bitmap is None:
+            bitmap = self.bitmaps[-1]
+        self.assertTrue(iotests.compare_images(bitmap.drive['file'],
+                                               bitmap.last_target()))
         return True
 
 
@@ -166,20 +200,20 @@ class TestIncrementalBackup(iotests.QMPTestCase):
         i.e.; after IO requests begin modifying the drive.
         '''
         self.create_full_backup()
-        self.add_bitmap('bitmap0', 'drive0')
+        self.add_bitmap('bitmap0', self.drives[0])
 
         # Sanity: Create a "hollow" incremental backup
         self.create_incremental()
         # Three writes: One complete overwrite, one new segment,
         # and one partial overlap.
-        self.hmp_io_writes('drive0', (('0xab', 0, 512),
-                                      ('0xfe', '16M', '256k'),
-                                      ('0x64', '32736k', '64k')))
+        self.hmp_io_writes(self.drives[0]['id'], (('0xab', 0, 512),
+                                                  ('0xfe', '16M', '256k'),
+                                                  ('0x64', '32736k', '64k')))
         self.create_incremental()
         # Three more writes, one of each kind, like above
-        self.hmp_io_writes('drive0', (('0x9a', 0, 512),
-                                      ('0x55', '8M', '352k'),
-                                      ('0x78', '15872k', '1M')))
+        self.hmp_io_writes(self.drives[0]['id'], (('0x9a', 0, 512),
+                                                  ('0x55', '8M', '352k'),
+                                                  ('0x78', '15872k', '1M')))
         self.create_incremental()
         return True
 
@@ -191,41 +225,43 @@ class TestIncrementalBackup(iotests.QMPTestCase):
         bitmap AFTER writes have already occurred. Use transactions to create
         a full backup and synchronize both bitmaps to this backup.
         Create an incremental backup through both bitmaps and verify that
-        both backups match the full backup.
+        both backups match the current drive0 image.
         '''
-        bitmap0 = self.add_bitmap('bitmap0', 'drive0')
-        self.hmp_io_writes('drive0', (('0xab', 0, 512),
-                                      ('0xfe', '16M', '256k'),
-                                      ('0x64', '32736k', '64k')))
-        bitmap1 = self.add_bitmap('bitmap1', 'drive0')
+
+        drive0 = self.drives[0]
+        bitmap0 = self.add_bitmap('bitmap0', self.drives[0])
+        self.hmp_io_writes(drive0['id'], (('0xab', 0, 512),
+                                          ('0xfe', '16M', '256k'),
+                                          ('0x64', '32736k', '64k')))
+        bitmap1 = self.add_bitmap('bitmap1', drive0)
 
         result = self.vm.qmp('transaction', actions=[
             {
                 'type': 'block-dirty-bitmap-clear',
-                'data': { 'node': 'drive0',
-                          'name': 'bitmap0' },
+                'data': { 'node': bitmap0.drive['id'],
+                          'name': bitmap0.name },
             },
             {
                 'type': 'block-dirty-bitmap-clear',
-                'data': { 'node': 'drive0',
-                          'name': 'bitmap1' },
+                'data': { 'node': bitmap1.drive['id'],
+                          'name': bitmap1.name },
             },
             {
                 'type': 'drive-backup',
-                'data': { 'device': 'drive0',
+                'data': { 'device': drive0['id'],
                           'sync': 'full',
-                          'format': iotests.imgfmt,
-                          'target': self.full_bak },
+                          'format': drive0['fmt'],
+                          'target': drive0['backup'] },
             }
         ])
         self.assert_qmp(result, 'return', {})
         self.wait_until_completed()
-        self.files.append(self.full_bak)
+        self.files.append(drive0['backup'])
         self.check_full_backup()
 
-        self.hmp_io_writes('drive0', (('0x9a', 0, 512),
-                                      ('0x55', '8M', '352k'),
-                                      ('0x78', '15872k', '1M')))
+        self.hmp_io_writes(drive0['id'], (('0x9a', 0, 512),
+                                          ('0x55', '8M', '352k'),
+                                          ('0x78', '15872k', '1M')))
         # Both bitmaps should be in sync and create fully valid
         # incremental backups
         res1 = self.create_incremental(bitmap0)
@@ -241,15 +277,19 @@ class TestIncrementalBackup(iotests.QMPTestCase):
         afterwards and verify that the backup created is correct.
         '''
 
-        # Create a blkdebug interface to this img as 'drive1'
+        # Create a blkdebug interface to this img as 'drive1',
+        # but don't actually create a new image.
+        drive1 = self.add_node('drive1', self.drives[0]['fmt'],
+                               path=self.drives[0]['file'],
+                               backup=self.drives[0]['backup'])
         result = self.vm.qmp('blockdev-add', options={
             'id': 'drive1',
-            'driver': iotests.imgfmt,
+            'driver': drive1['fmt'],
             'file': {
                 'driver': 'blkdebug',
                 'image': {
                     'driver': 'file',
-                    'filename': self.test_img
+                    'filename': drive1['file']
                 },
                 'set-state': [{
                     'event': 'flush_to_disk',
@@ -267,38 +307,38 @@ class TestIncrementalBackup(iotests.QMPTestCase):
         })
         self.assert_qmp(result, 'return', {})
 
-        self.create_full_backup()
-        self.add_bitmap('bitmap0', 'drive1')
+        self.create_full_backup(self.drives[0])
+        self.add_bitmap('bitmap0', drive1)
         # Note: at this point, during a normal execution,
         # Assume that the VM resumes and begins issuing IO requests here.
 
-        self.hmp_io_writes('drive1', (('0xab', 0, 512),
-                                      ('0xfe', '16M', '256k'),
-                                      ('0x64', '32736k', '64k')))
+        self.hmp_io_writes(drive1['id'], (('0xab', 0, 512),
+                                          ('0xfe', '16M', '256k'),
+                                          ('0x64', '32736k', '64k')))
 
         result = self.create_incremental(validate=False)
         self.assertFalse(result)
-        self.hmp_io_writes('drive1', (('0x9a', 0, 512),
-                                      ('0x55', '8M', '352k'),
-                                      ('0x78', '15872k', '1M')))
+        self.hmp_io_writes(drive1['id'], (('0x9a', 0, 512),
+                                          ('0x55', '8M', '352k'),
+                                          ('0x78', '15872k', '1M')))
         self.create_incremental()
 
 
     def test_sync_dirty_bitmap_missing(self):
         self.assert_no_active_block_jobs()
-        self.files.append(self.foo_img)
-        result = self.vm.qmp('drive-backup', device='drive0',
-                             sync='dirty-bitmap', format=iotests.imgfmt,
-                             target=self.foo_img)
+        self.files.append(self.err_img)
+        result = self.vm.qmp('drive-backup', device=self.drives[0]['id'],
+                             sync='dirty-bitmap', format=self.drives[0]['fmt'],
+                             target=self.err_img)
         self.assert_qmp(result, 'error/class', 'GenericError')
 
 
     def test_sync_dirty_bitmap_not_found(self):
         self.assert_no_active_block_jobs()
-        self.files.append(self.foo_img)
-        result = self.vm.qmp('drive-backup', device='drive0',
+        self.files.append(self.err_img)
+        result = self.vm.qmp('drive-backup', device=self.drives[0]['id'],
                              sync='dirty-bitmap', bitmap='unknown',
-                             format=iotests.imgfmt, target=self.foo_img)
+                             format=self.drives[0]['fmt'], target=self.err_img)
         self.assert_qmp(result, 'error/class', 'GenericError')
 
 
