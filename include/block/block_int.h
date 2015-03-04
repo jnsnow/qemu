@@ -619,6 +619,14 @@ void backup_start(BlockDriverState *bs, BlockDriverState *target,
                   BlockCompletionFunc *cb, void *opaque,
                   Error **errp);
 
+/*
+ * backup_transaction_complete
+ * @job The BackupJob that was associated with a transaction
+ * @ret Amalgamated return code for the entire transaction
+ */
+void backup_transaction_complete(BlockJob *job, int ret);
+
+
 void blk_dev_change_media_cb(BlockBackend *blk, bool load);
 bool blk_dev_has_removable_media(BlockBackend *blk);
 void blk_dev_eject_request(BlockBackend *blk, bool force);

@@ -233,6 +233,15 @@ typedef struct {
     int ret;
 } BackupCompleteData;
 
+void backup_transaction_complete(BlockJob *job, int ret)
+{
+    BackupBlockJob *s = container_of(job, BackupBlockJob, common);
+
+    if (s->sync_bitmap) {
+        bdrv_dirty_bitmap_decref(job->bs, s->sync_bitmap, ret, NULL);
+    }
+}
+
 static void backup_complete(BlockJob *job, void *opaque)
 {
     BackupBlockJob *s = container_of(job, BackupBlockJob, common);

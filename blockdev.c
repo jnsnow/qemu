@@ -1363,14 +1363,6 @@ static void transaction_callback(void *opaque, int ret)
 
 typedef void (CallbackFn)(void *opaque, int ret);
 
-/* Temporary. Removed in the next patch. */
-CallbackFn *new_transaction_wrapper(BlkTransactionState *common,
-                                    void *opaque,
-                                    void (*callback)(void *, int),
-                                    void **new_opaque);
-
-void undo_transaction_wrapper(BlkTransactionState *common);
-
 /**
  * Create a new transactional callback wrapper.
  *
@@ -1389,7 +1381,7 @@ void undo_transaction_wrapper(BlkTransactionState *common);
  *
  * @return The callback to be used instead of @callback.
  */
-CallbackFn *new_transaction_wrapper(BlkTransactionState *common,
+static CallbackFn *new_transaction_wrapper(BlkTransactionState *common,
                                            void *opaque,
                                            CallbackFn *callback,
                                            void **new_opaque)
@@ -1416,7 +1408,7 @@ CallbackFn *new_transaction_wrapper(BlkTransactionState *common,
 /**
  * Undo any actions performed by the above call.
  */
-void undo_transaction_wrapper(BlkTransactionState *common)
+static void undo_transaction_wrapper(BlkTransactionState *common)
 {
     BlkTransactionList *btl = common->list;
     BlkTransactionState *bts;
@@ -1449,6 +1441,7 @@ void undo_transaction_wrapper(BlkTransactionState *common)
     blk_put_transaction_state(common);
 }
 
+static void block_job_cb(void *opaque, int ret);
 static void _drive_backup(const char *device, const char *target,
                           bool has_format, const char *format,
                           enum MirrorSyncMode sync,
@@ -1767,6 +1760,9 @@ static void drive_backup_prepare(BlkTransactionState *common, Error **errp)
     BlockDriverState *bs;
     DriveBackup *backup;
     Error *local_err = NULL;
+    CallbackFn *cb;
+    void *opaque;
+    BdrvDirtyBitmap *bmap = NULL;
 
     assert(common->action->kind == TRANSACTION_ACTION_KIND_DRIVE_BACKUP);
     backup = common->action->drive_backup;
@@ -1776,6 +1772,19 @@ static void drive_backup_prepare(BlkTransactionState *common, Error **errp)
         error_set(errp, QERR_DEVICE_NOT_FOUND, backup->device);
         return;
     }
+
+    /* BackupBlockJob is opaque to us, so look up the bitmap ourselves */
+    if (backup->has_bitmap) {
+        bmap = bdrv_find_dirty_bitmap(bs, backup->bitmap);
+        if (!bmap) {
+            error_setg(errp, "Bitmap '%s' could not be found", backup->bitmap);
+            return;
+        }
+    }
+
+    /* Create our transactional callback wrapper,
+       and register that we'd like to call .cb() later. */
+    cb = new_transaction_wrapper(common, bs, block_job_cb, &opaque);
 
     /* AioContext is released in .clean() */
     state->aio_context = bdrv_get_aio_context(bs);
@@ -1789,7 +1798,7 @@ static void drive_backup_prepare(BlkTransactionState *common, Error **errp)
                   backup->has_bitmap, backup->bitmap,
                   backup->has_on_source_error, backup->on_source_error,
                   backup->has_on_target_error, backup->on_target_error,
-                  NULL, NULL,
+                  cb, opaque,
                   &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
@@ -1798,6 +1807,11 @@ static void drive_backup_prepare(BlkTransactionState *common, Error **errp)
 
     state->bs = bs;
     state->job = state->bs->job;
+    /* Keep the job alive until .cb(), too. */
+    block_job_incref(state->job);
+    if (bmap) {
+        bdrv_dirty_bitmap_incref(bmap);
+    }
 }
 
 static void drive_backup_abort(BlkTransactionState *common)
@@ -1809,6 +1823,10 @@ static void drive_backup_abort(BlkTransactionState *common)
     if (bs && bs->job && bs->job == state->job) {
         block_job_cancel_sync(bs->job);
     }
+
+    /* Undo any callback actions we may have done. Putting down references
+     * obtained during prepare() is handled by cb(). */
+    undo_transaction_wrapper(common);
 }
 
 static void drive_backup_clean(BlkTransactionState *common)
@@ -1818,6 +1836,27 @@ static void drive_backup_clean(BlkTransactionState *common)
     if (state->aio_context) {
         aio_context_release(state->aio_context);
     }
+}
+
+static void drive_backup_cb(BlkTransactionState *common)
+{
+    BlkTransactionData *btd = common->opaque;
+    BlockDriverState *bs = btd->opaque;
+    DriveBackupState *state = DO_UPCAST(DriveBackupState, common, common);
+
+    assert(state->bs == bs);
+    if (bs->job) {
+        assert(state->job == bs->job);
+    }
+
+    state->aio_context = bdrv_get_aio_context(bs);
+    aio_context_acquire(state->aio_context);
+
+    /* Note: We also have the individual job's return code in btd->ret */
+    backup_transaction_complete(state->job, common->list->status);
+    block_job_decref(state->job);
+
+    aio_context_release(state->aio_context);
 }
 
 typedef struct BlockdevBackupState {
@@ -2004,7 +2043,8 @@ static const BdrvActionOps actions[] = {
         .instance_size = sizeof(DriveBackupState),
         .prepare = drive_backup_prepare,
         .abort = drive_backup_abort,
-        .clean = drive_backup_clean
+        .clean = drive_backup_clean,
+        .cb = drive_backup_cb
     },
     [TRANSACTION_ACTION_KIND_BLOCKDEV_BACKUP] = {
         .instance_size = sizeof(BlockdevBackupState),
