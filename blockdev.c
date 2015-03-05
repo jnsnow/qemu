@@ -1207,6 +1207,8 @@ static BdrvDirtyBitmap *block_dirty_bitmap_lookup(const char *node,
 /* New and old BlockDriverState structs for atomic group operations */
 
 typedef struct BlkTransactionState BlkTransactionState;
+typedef struct BlkTransactionList BlkTransactionList;
+typedef struct BlkTransactionData BlkTransactionData;
 
 /* Only prepare() may fail. In a single transaction, only one of commit() or
    abort() will be called, clean() will always be called if it present. */
@@ -1221,6 +1223,8 @@ typedef struct BdrvActionOps {
     void (*abort)(BlkTransactionState *common);
     /* Clean up resource in the end, can be NULL. */
     void (*clean)(BlkTransactionState *common);
+    /* Execute this after +all+ jobs in the transaction finish */
+    void (*cb)(BlkTransactionState *common);
 } BdrvActionOps;
 
 /*
@@ -1231,8 +1235,219 @@ typedef struct BdrvActionOps {
 struct BlkTransactionState {
     TransactionAction *action;
     const BdrvActionOps *ops;
+    BlkTransactionList *list;
+    void *opaque;
+    /* Allow external users (callbacks) to reference this obj past .clean() */
+    int refcount;
+    /* All transactions in the current group */
     QSIMPLEQ_ENTRY(BlkTransactionState) entry;
+    /* Transactions in the current group with callbacks */
+    QSIMPLEQ_ENTRY(BlkTransactionState) list_entry;
 };
+
+struct BlkTransactionList {
+    int jobs;     /* Effectively: A refcount */
+    int status;   /* Cumulative retcode */
+    QSIMPLEQ_HEAD(actions, BlkTransactionState) actions;
+};
+
+typedef struct BlkTransactionData {
+    void *opaque; /* Data given to encapsulated callback */
+    int ret;      /* Return code given to encapsulated callback */
+} BlkTransactionData;
+
+typedef struct BlkTransactionWrapper {
+    void *opaque; /* Data to be given to encapsulated callback */
+    void (*callback)(void *opaque, int ret); /* Encapsulated callback */
+} BlkTransactionWrapper;
+
+static BlkTransactionList *new_blk_transaction_list(void)
+{
+    BlkTransactionList *btl = g_malloc0(sizeof(*btl));
+
+    /* Implicit 'job' for qmp_transaction itself */
+    btl->jobs = 1;
+    QSIMPLEQ_INIT(&btl->actions);
+    return btl;
+}
+
+static BlkTransactionState *blk_put_transaction_state(BlkTransactionState *bts)
+{
+    bts->refcount--;
+    if (bts->refcount == 0) {
+        g_free(bts);
+        return NULL;
+    }
+    return bts;
+}
+
+static void del_blk_transaction_list(BlkTransactionList *btl)
+{
+    BlkTransactionState *bts, *bts_next;
+
+    /* The list should in normal cases be empty,
+     * but in case someone really just wants to kibosh the whole deal: */
+    QSIMPLEQ_FOREACH_SAFE(bts, &btl->actions, list_entry, bts_next) {
+        g_free(bts->opaque);
+        blk_put_transaction_state(bts);
+    }
+
+    g_free(btl);
+}
+
+static void blk_run_transaction_callbacks(BlkTransactionList *btl)
+{
+    BlkTransactionState *bts, *bts_next;
+
+    QSIMPLEQ_FOREACH_SAFE(bts, &btl->actions, list_entry, bts_next) {
+        if (bts->ops->cb) {
+            bts->ops->cb(bts);
+        }
+
+        /* Free the BlkTransactionData */
+        g_free(bts->opaque);
+        bts->opaque = NULL;
+        blk_put_transaction_state(bts);
+    }
+
+    QSIMPLEQ_INIT(&btl->actions);
+}
+
+static BlkTransactionList *put_blk_transaction_list(BlkTransactionList *btl)
+{
+    btl->jobs--;
+    if (btl->jobs == 0) {
+        blk_run_transaction_callbacks(btl);
+        del_blk_transaction_list(btl);
+        return NULL;
+    }
+    return btl;
+}
+
+static void blk_transaction_complete(BlkTransactionState *common)
+{
+    BlkTransactionList *btl = common->list;
+
+    /* Add this action into the pile to be completed */
+    QSIMPLEQ_INSERT_TAIL(&btl->actions, common, list_entry);
+
+    /* Inform the list that we have a completion;
+     * possibly run all the pending actions. */
+    put_blk_transaction_list(btl);
+}
+
+/**
+ * Intercept a callback that was issued due to a transactional action.
+ */
+static void transaction_callback(void *opaque, int ret)
+{
+    BlkTransactionState *common = opaque;
+    BlkTransactionWrapper *btw = common->opaque;
+
+    /* Prepare data for ops->cb() */
+    BlkTransactionData *btd = g_malloc0(sizeof(*btd));
+    btd->opaque = btw->opaque;
+    btd->ret = ret;
+
+    /* Transaction state now tracks OUR data */
+    common->opaque = btd;
+
+    /* Keep track of the amalgamated return code */
+    common->list->status |= ret;
+
+    /* Deliver the intercepted callback FIRST */
+    btw->callback(btw->opaque, ret);
+    blk_transaction_complete(common);
+    g_free(btw);
+}
+
+typedef void (CallbackFn)(void *opaque, int ret);
+
+/* Temporary. Removed in the next patch. */
+CallbackFn *new_transaction_wrapper(BlkTransactionState *common,
+                                    void *opaque,
+                                    void (*callback)(void *, int),
+                                    void **new_opaque);
+
+void undo_transaction_wrapper(BlkTransactionState *common);
+
+/**
+ * Create a new transactional callback wrapper.
+ *
+ * Given a callback and a closure, generate a new
+ * callback and closure that will invoke the
+ * given callback with the given closure.
+ *
+ * After all wrappers in the transactional group have
+ * been processed, each action's .cb() method will be
+ * invoked.
+ *
+ * @common The transactional state to set a callback for.
+ * @opaque A closure intended for the encapsulated callback.
+ * @callback The callback we are encapsulating.
+ * @new_opaque The closure to be used instead of @opaque.
+ *
+ * @return The callback to be used instead of @callback.
+ */
+CallbackFn *new_transaction_wrapper(BlkTransactionState *common,
+                                           void *opaque,
+                                           CallbackFn *callback,
+                                           void **new_opaque)
+{
+    BlkTransactionWrapper *btw = g_malloc0(sizeof(*btw));
+    assert(new_opaque);
+
+    /* Stash the original callback information */
+    btw->opaque = opaque;
+    btw->callback = callback;
+    common->opaque = btw;
+
+    /* The BTS will serve as our new closure */
+    *new_opaque = common;
+    common->refcount++;
+
+    /* Inform the transaction BTL to expect one more return */
+    common->list->jobs++;
+
+    /* Lastly, the actual callback function to handle the interception. */
+    return transaction_callback;
+}
+
+/**
+ * Undo any actions performed by the above call.
+ */
+void undo_transaction_wrapper(BlkTransactionState *common)
+{
+    BlkTransactionList *btl = common->list;
+    BlkTransactionState *bts;
+    BlkTransactionData *btd;
+
+    /* Stage 0: Wrapper was never created: */
+    if (common->opaque == NULL && common->refcount == 1) {
+        return;
+    }
+
+    /* Stage 2: Job already completed or was canceled.
+     * Force an error in the callback data and just invoke the completion
+     * handler to perform appropriate cleanup for us.
+     */
+    QSIMPLEQ_FOREACH(bts, &btl->actions, list_entry) {
+        if (bts == common) {
+            btd = common->opaque;
+            /* Force error for callback */
+            btd->ret = -1;
+            common->ops->cb(common);
+            QSIMPLEQ_REMOVE(&btl->actions, common,
+                            BlkTransactionState, list_entry);
+            goto cleanup;
+        }
+    }
+    /* Stage 1: Callback created, but job never launched */
+    put_blk_transaction_list(common->list);
+ cleanup:
+    g_free(common->opaque);
+    blk_put_transaction_state(common);
+}
 
 /* internal snapshot private data */
 typedef struct InternalSnapshotState {
@@ -1775,7 +1990,7 @@ static const BdrvActionOps actions[] = {
         .instance_size = sizeof(DriveBackupState),
         .prepare = drive_backup_prepare,
         .abort = drive_backup_abort,
-        .clean = drive_backup_clean,
+        .clean = drive_backup_clean
     },
     [TRANSACTION_ACTION_KIND_BLOCKDEV_BACKUP] = {
         .instance_size = sizeof(BlockdevBackupState),
@@ -1815,10 +2030,12 @@ void qmp_transaction(TransactionActionList *dev_list, Error **errp)
 {
     TransactionActionList *dev_entry = dev_list;
     BlkTransactionState *state, *next;
+    BlkTransactionList *btl;
     Error *local_err = NULL;
 
     QSIMPLEQ_HEAD(snap_bdrv_states, BlkTransactionState) snap_bdrv_states;
     QSIMPLEQ_INIT(&snap_bdrv_states);
+    btl = new_blk_transaction_list();
 
     /* drain all i/o before any operations */
     bdrv_drain_all();
@@ -1837,8 +2054,10 @@ void qmp_transaction(TransactionActionList *dev_list, Error **errp)
         assert(ops->instance_size > 0);
 
         state = g_malloc0(ops->instance_size);
+        state->refcount = 1;
         state->ops = ops;
         state->action = dev_info;
+        state->list = btl;
         QSIMPLEQ_INSERT_TAIL(&snap_bdrv_states, state, entry);
 
         state->ops->prepare(state, &local_err);
@@ -1869,8 +2088,10 @@ exit:
         if (state->ops->clean) {
             state->ops->clean(state);
         }
-        g_free(state);
+        blk_put_transaction_state(state);
     }
+
+    put_blk_transaction_list(btl);
 }
 
 
