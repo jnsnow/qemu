@@ -2748,7 +2748,7 @@ if test "$mingw32" = yes; then
     # g_poll is required in order to integrate with the glib main loop.
     glib_req_ver=2.20
 else
-    glib_req_ver=2.12
+    glib_req_ver=2.16
 fi
 glib_modules=gthread-2.0
 if test "$modules" = yes; then
