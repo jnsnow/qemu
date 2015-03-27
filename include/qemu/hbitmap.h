@@ -65,6 +65,17 @@ struct HBitmapIter {
 HBitmap *hbitmap_alloc(uint64_t size, int granularity);
 
 /**
+ * hbitmap_merge:
+ * @a: The bitmap to store the result in.
+ * @b: The bitmap to merge into @a.
+ *
+ * Merge two bitmaps together.
+ * A := A (BITOR) B.
+ * B is left unmodified.
+ */
+bool hbitmap_merge(HBitmap *a, const HBitmap *b);
+
+/**
  * hbitmap_empty:
  * @hb: HBitmap to operate on.
  *
