@@ -226,6 +226,57 @@ class TestIncrementalBackup(iotests.QMPTestCase):
         return True
 
 
+    def test_incremental_transaction(self):
+        '''Test: Verify backups made from transactionally created bitmaps.
+
+        Create a bitmap "before" VM execution begins, then create a second
+        bitmap AFTER writes have already occurred. Use transactions to create
+        a full backup and synchronize both bitmaps to this backup.
+        Create an incremental backup through both bitmaps and verify that
+        both backups match the current drive0 image.
+        '''
+
+        drive0 = self.drives[0]
+        bitmap0 = self.add_bitmap('bitmap0', self.drives[0])
+        self.hmp_io_writes(drive0['id'], (('0xab', 0, 512),
+                                          ('0xfe', '16M', '256k'),
+                                          ('0x64', '32736k', '64k')))
+        bitmap1 = self.add_bitmap('bitmap1', drive0)
+
+        result = self.vm.qmp('transaction', actions=[
+            {
+                'type': 'block-dirty-bitmap-clear',
+                'data': { 'node': bitmap0.drive['id'],
+                          'name': bitmap0.name },
+            },
+            {
+                'type': 'block-dirty-bitmap-clear',
+                'data': { 'node': bitmap1.drive['id'],
+                          'name': bitmap1.name },
+            },
+            {
+                'type': 'drive-backup',
+                'data': { 'device': drive0['id'],
+                          'sync': 'full',
+                          'format': drive0['fmt'],
+                          'target': drive0['backup'] },
+            }
+        ])
+        self.assert_qmp(result, 'return', {})
+        self.wait_until_completed()
+        self.files.append(drive0['backup'])
+        self.check_full_backup()
+
+        self.hmp_io_writes(drive0['id'], (('0x9a', 0, 512),
+                                          ('0x55', '8M', '352k'),
+                                          ('0x78', '15872k', '1M')))
+        # Both bitmaps should be in sync and create fully valid
+        # incremental backups
+        res1 = self.create_incremental(bitmap0)
+        res2 = self.create_incremental(bitmap1)
+        self.assertTrue(res1 and res2)
+
+
     def test_incremental_failure(self):
         '''Test: Verify backups made after a failure are correct.
 
