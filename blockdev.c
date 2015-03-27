@@ -1218,7 +1218,6 @@ static BdrvDirtyBitmap *block_dirty_bitmap_lookup(const char *node,
     } else {
         aio_context_release(aio_context);
     }
-
     return bitmap;
 
  fail:
