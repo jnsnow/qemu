@@ -2749,7 +2749,6 @@ static void transaction_action_callback(void *opaque, int ret)
  *
  * @return The callback to be used instead of @callback.
  */
-__attribute__((__unused__))
 static CallbackFn *new_action_cb_wrapper(BlkActionState *common,
                                          void *opaque,
                                          CallbackFn *callback,
@@ -2777,7 +2776,6 @@ static CallbackFn *new_action_cb_wrapper(BlkActionState *common,
 /**
  * Undo any actions performed by the above call.
  */
-__attribute__((__unused__))
 static void cancel_action_cb_wrapper(BlkActionState *common)
 {
     /* Stage 0: Wrapper was never created: */
@@ -3123,6 +3121,9 @@ static void drive_backup_prepare(BlkActionState *common, Error **errp)
     BlockBackend *blk;
     DriveBackup *backup;
     Error *local_err = NULL;
+    CallbackFn *cb;
+    void *opaque;
+    BdrvDirtyBitmap *bmap = NULL;
 
     assert(common->action->kind == TRANSACTION_ACTION_KIND_DRIVE_BACKUP);
     backup = common->action->drive_backup;
@@ -3133,6 +3134,19 @@ static void drive_backup_prepare(BlkActionState *common, Error **errp)
         return;
     }
     bs = blk_bs(blk);
+
+    /* BackupBlockJob is opaque to us, so look up the bitmap ourselves */
+    if (backup->has_bitmap) {
+        bmap = bdrv_find_dirty_bitmap(bs, backup->bitmap);
+        if (!bmap) {
+            error_setg(errp, "Bitmap '%s' could not be found", backup->bitmap);
+            return;
+        }
+    }
+
+    /* Create our transactional callback wrapper,
+       and register that we'd like to call .cb() later. */
+    cb = new_action_cb_wrapper(common, bs, block_job_cb, &opaque);
 
     /* AioContext is released in .clean() */
     state->aio_context = bdrv_get_aio_context(bs);
@@ -3146,7 +3160,7 @@ static void drive_backup_prepare(BlkActionState *common, Error **errp)
                     backup->has_bitmap, backup->bitmap,
                     backup->has_on_source_error, backup->on_source_error,
                     backup->has_on_target_error, backup->on_target_error,
-                    NULL, NULL,
+                    cb, opaque,
                     &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
@@ -3155,6 +3169,12 @@ static void drive_backup_prepare(BlkActionState *common, Error **errp)
 
     state->bs = bs;
     state->job = state->bs->job;
+    /* Keep the job alive until .cb(), too:
+     * References are only incremented after the job launches successfully. */
+    block_job_incref(state->job);
+    if (bmap) {
+        bdrv_dirty_bitmap_incref(bmap);
+    }
 }
 
 static void drive_backup_abort(BlkActionState *common)
@@ -3166,6 +3186,10 @@ static void drive_backup_abort(BlkActionState *common)
     if (bs && bs->job && bs->job == state->job) {
         block_job_cancel_sync(bs->job);
     }
+
+    /* Undo any callback actions we may have done. Putting down references
+     * obtained during prepare() is handled by cb(). */
+    cancel_action_cb_wrapper(common);
 }
 
 static void drive_backup_clean(BlkActionState *common)
@@ -3175,6 +3199,27 @@ static void drive_backup_clean(BlkActionState *common)
     if (state->aio_context) {
         aio_context_release(state->aio_context);
     }
+}
+
+static void drive_backup_cb(BlkActionState *common)
+{
+    BlkActionCallbackData *cb_data = common->cb_data;
+    BlockDriverState *bs = cb_data->opaque;
+    DriveBackupState *state = DO_UPCAST(DriveBackupState, common, common);
+
+    assert(state->bs == bs);
+    if (bs->job) {
+        assert(state->job == bs->job);
+    }
+
+    state->aio_context = bdrv_get_aio_context(bs);
+    aio_context_acquire(state->aio_context);
+
+    /* Note: We also have the individual job's return code in cb_data->ret */
+    backup_transaction_complete(state->job, common->transaction->status);
+    block_job_decref(state->job);
+
+    aio_context_release(state->aio_context);
 }
 
 typedef struct BlockdevBackupState {
@@ -3364,6 +3409,7 @@ static const BlkActionOps actions[] = {
         .prepare = drive_backup_prepare,
         .abort = drive_backup_abort,
         .clean = drive_backup_clean,
+        .cb = drive_backup_cb,
     },
     [TRANSACTION_ACTION_KIND_BLOCKDEV_BACKUP] = {
         .instance_size = sizeof(BlockdevBackupState),
