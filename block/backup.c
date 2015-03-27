@@ -313,7 +313,7 @@ static void coroutine_fn backup_run(void *opaque)
         int64_t last_cluster = -1;
         bool polyrhythmic;
 
-        bdrv_dirty_iter_init(bs, job->sync_bitmap, &hbi);
+        bdrv_dirty_iter_init(job->sync_bitmap, &hbi);
         /* Does the granularity happen to match our backup cluster size? */
         polyrhythmic = (bdrv_dirty_bitmap_granularity(job->sync_bitmap) !=
                         BACKUP_CLUSTER_SIZE);
