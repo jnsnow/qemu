@@ -1253,6 +1253,19 @@ typedef struct BlkActionOps {
 } BlkActionOps;
 
 /**
+ * BlkTransactionState:
+ * Object to track the job completion info for jobs launched
+ * by a transaction group.
+ *
+ * @jobs: A reference count that tracks how many jobs still need to complete.
+ * @actions: A list of all Actions in the Transaction.
+ */
+typedef struct BlkTransactionState {
+    int jobs;
+    QTAILQ_HEAD(actions, BlkActionState) actions;
+} BlkTransactionState;
+
+/**
  * BlkActionState:
  * Describes one Action's state within a Transaction.
  *
@@ -1267,8 +1280,44 @@ typedef struct BlkActionOps {
 struct BlkActionState {
     TransactionAction *action;
     const BlkActionOps *ops;
-    QSIMPLEQ_ENTRY(BlkActionState) entry;
+    QTAILQ_ENTRY(BlkActionState) entry;
 };
+
+static BlkTransactionState *new_blk_transaction_state(void)
+{
+    BlkTransactionState *bts = g_new0(BlkTransactionState, 1);
+
+    /* The qmp_transaction function itself can be considered a pending job
+     * that should complete before pending action callbacks are executed,
+     * so increment the jobs remaining refcount to indicate this. */
+    bts->jobs = 1;
+    QTAILQ_INIT(&bts->actions);
+    return bts;
+}
+
+static void destroy_blk_transaction_state(BlkTransactionState *bts)
+{
+    BlkActionState *bas, *bas_next;
+
+    /* The list should in normal cases be empty,
+     * but in case someone really just wants to kibosh the whole deal: */
+    QTAILQ_FOREACH_SAFE(bas, &bts->actions, entry, bas_next) {
+        QTAILQ_REMOVE(&bts->actions, bas, entry);
+        g_free(bas);
+    }
+
+    g_free(bts);
+}
+
+static BlkTransactionState *transaction_job_complete(BlkTransactionState *bts)
+{
+    bts->jobs--;
+    if (bts->jobs == 0) {
+        destroy_blk_transaction_state(bts);
+        return NULL;
+    }
+    return bts;
+}
 
 /* internal snapshot private data */
 typedef struct InternalSnapshotState {
@@ -1857,10 +1906,10 @@ void qmp_transaction(TransactionActionList *dev_list, Error **errp)
 {
     TransactionActionList *dev_entry = dev_list;
     BlkActionState *state, *next;
+    BlkTransactionState *bts;
     Error *local_err = NULL;
 
-    QSIMPLEQ_HEAD(snap_bdrv_states, BlkActionState) snap_bdrv_states;
-    QSIMPLEQ_INIT(&snap_bdrv_states);
+    bts = new_blk_transaction_state();
 
     /* drain all i/o before any operations */
     bdrv_drain_all();
@@ -1881,7 +1930,7 @@ void qmp_transaction(TransactionActionList *dev_list, Error **errp)
         state = g_malloc0(ops->instance_size);
         state->ops = ops;
         state->action = dev_info;
-        QSIMPLEQ_INSERT_TAIL(&snap_bdrv_states, state, entry);
+        QTAILQ_INSERT_TAIL(&bts->actions, state, entry);
 
         state->ops->prepare(state, &local_err);
         if (local_err) {
@@ -1890,7 +1939,7 @@ void qmp_transaction(TransactionActionList *dev_list, Error **errp)
         }
     }
 
-    QSIMPLEQ_FOREACH(state, &snap_bdrv_states, entry) {
+    QTAILQ_FOREACH(state, &bts->actions, entry) {
         if (state->ops->commit) {
             state->ops->commit(state);
         }
@@ -1901,18 +1950,21 @@ void qmp_transaction(TransactionActionList *dev_list, Error **errp)
 
 delete_and_fail:
     /* failure, and it is all-or-none; roll back all operations */
-    QSIMPLEQ_FOREACH(state, &snap_bdrv_states, entry) {
+    QTAILQ_FOREACH(state, &bts->actions, entry) {
         if (state->ops->abort) {
             state->ops->abort(state);
         }
     }
 exit:
-    QSIMPLEQ_FOREACH_SAFE(state, &snap_bdrv_states, entry, next) {
+    QTAILQ_FOREACH_SAFE(state, &bts->actions, entry, next) {
         if (state->ops->clean) {
             state->ops->clean(state);
         }
+        QTAILQ_REMOVE(&bts->actions, state, entry);
         g_free(state);
     }
+
+    transaction_job_complete(bts);
 }
 
 
