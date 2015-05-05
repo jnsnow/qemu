@@ -157,6 +157,8 @@ static bool qtest_opened;
  * NUM=0 even though it is remapped to GSI 2).
  */
 
+static const char *hex = "0123456789abcdef";
+
 static int hex2nib(char ch)
 {
     if (ch >= '0' && ch <= '9') {
@@ -168,6 +170,12 @@ static int hex2nib(char ch)
     } else {
         return -1;
     }
+}
+
+static inline void byte2hex(uint8_t byte, uint8_t *out)
+{
+    *out++ = hex[byte >> 4];
+    *out = hex[byte & 0x0F];
 }
 
 static void qtest_get_time(qemu_timeval *tv)
@@ -414,6 +422,7 @@ static void qtest_process_command(CharDriverState *chr, gchar **words)
     } else if (strcmp(words[0], "read") == 0) {
         uint64_t addr, len, i;
         uint8_t *data;
+        uint8_t *enc;
 
         g_assert(words[1] && words[2]);
         addr = strtoull(words[1], NULL, 0);
@@ -422,14 +431,17 @@ static void qtest_process_command(CharDriverState *chr, gchar **words)
         data = g_malloc(len);
         cpu_physical_memory_read(addr, data, len);
 
-        qtest_send_prefix(chr);
-        qtest_send(chr, "OK 0x");
+        enc = g_malloc(2 * len + 1);
         for (i = 0; i < len; i++) {
-            qtest_sendf(chr, "%02x", data[i]);
+            byte2hex(data[i], &enc[i * 2]);
         }
-        qtest_send(chr, "\n");
+        enc[2 * len] = '\0';
+
+        qtest_send_prefix(chr);
+        qtest_sendf(chr, "OK 0x%s\n", enc);
 
         g_free(data);
+        g_free(enc);
     } else if (strcmp(words[0], "b64read") == 0) {
         uint64_t addr, len;
         uint8_t *data;

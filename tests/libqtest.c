@@ -651,6 +651,8 @@ uint64_t qtest_readq(QTestState *s, uint64_t addr)
     return qtest_read(s, "readq", addr);
 }
 
+static const char *hex = "0123456789abcdef";
+
 static int hex2nib(char ch)
 {
     if (ch >= '0' && ch <= '9') {
@@ -662,6 +664,12 @@ static int hex2nib(char ch)
     } else {
         return -1;
     }
+}
+
+static inline void byte2hex(uint8_t byte, uint8_t *out)
+{
+    *out++ = hex[byte >> 4];
+    *out = hex[byte & 0x0f];
 }
 
 void qtest_memread(QTestState *s, uint64_t addr, void *data, size_t size)
@@ -730,13 +738,16 @@ void qtest_memwrite(QTestState *s, uint64_t addr, const void *data, size_t size)
 {
     const uint8_t *ptr = data;
     size_t i;
+    uint8_t *enc = g_malloc(2 * size + 1);
 
-    qtest_sendf(s, "write 0x%" PRIx64 " 0x%zx 0x", addr, size);
     for (i = 0; i < size; i++) {
-        qtest_sendf(s, "%02x", ptr[i]);
+        byte2hex(ptr[i], &enc[i * 2]);
     }
-    qtest_sendf(s, "\n");
+    enc[2 * size] = '\0';
+
+    qtest_sendf(s, "write 0x%" PRIx64 " 0x%zx 0x%s\n", addr, size, enc);
     qtest_rsp(s, 0);
+    g_free(enc);
 }
 
 void qtest_memset(QTestState *s, uint64_t addr, uint8_t pattern, size_t size)
