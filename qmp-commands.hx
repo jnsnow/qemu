@@ -1238,11 +1238,14 @@ SQMP
 transaction
 -----------
 
-Atomically operate on one or more block devices.  The only supported operations
-for now are drive-backup, internal and external snapshotting.  A list of
-dictionaries is accepted, that contains the actions to be performed.
-If there is any failure performing any of the operations, all operations
-for the group are abandoned.
+Atomically operate on one or more block devices.  Operations that are
+currently supported: drive-backup, blockdev-backup,
+blockdev-snapshot-sync, blockdev-snapshot-internal-sync, abort,
+block-dirty-bitmap-add, block-dirty-bitmap-clear (refer to the
+qemu/qapi-schema.json file for minimum required QEMU versions for these
+operations).  A list of dictionaries is accepted, that contains the
+actions to be performed.  If there is any failure performing any of the
+operations, all operations for the group are abandoned.
 
 For external snapshots, the dictionary contains the device, the file to use for
 the new snapshot, and the format.  The default format, if not specified, is
