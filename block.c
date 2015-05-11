@@ -51,6 +51,12 @@
 #include <windows.h>
 #endif
 
+typedef enum BitmapSuccessorAction {
+    SUCCESSOR_ACTION_UNDEFINED = 0,
+    SUCCESSOR_ACTION_ABDICATE,
+    SUCCESSOR_ACTION_RECLAIM
+} BitmapSuccessorAction;
+
 /**
  * A BdrvDirtyBitmap can be in three possible states:
  * (1) successor is NULL and disabled is false: full r/w mode
@@ -65,6 +71,8 @@ struct BdrvDirtyBitmap {
     char *name;                 /* Optional non-empty unique ID */
     int64_t size;               /* Size of the bitmap (Number of sectors) */
     bool disabled;              /* Bitmap is read-only */
+    int successor_refcount;     /* Number of active handles to the successor */
+    BitmapSuccessorAction act;  /* Action to take on successor upon release */
     QLIST_ENTRY(BdrvDirtyBitmap) list;
 };
 
@@ -3133,6 +3141,7 @@ int bdrv_dirty_bitmap_create_successor(BlockDriverState *bs,
 
     /* Install the successor and freeze the parent */
     bitmap->successor = child;
+    bitmap->successor_refcount = 1;
     return 0;
 }
 
@@ -3140,9 +3149,9 @@ int bdrv_dirty_bitmap_create_successor(BlockDriverState *bs,
  * For a bitmap with a successor, yield our name to the successor,
  * delete the old bitmap, and return a handle to the new bitmap.
  */
-BdrvDirtyBitmap *bdrv_dirty_bitmap_abdicate(BlockDriverState *bs,
-                                            BdrvDirtyBitmap *bitmap,
-                                            Error **errp)
+static BdrvDirtyBitmap *bdrv_dirty_bitmap_abdicate(BlockDriverState *bs,
+                                                   BdrvDirtyBitmap *bitmap,
+                                                   Error **errp)
 {
     char *name;
     BdrvDirtyBitmap *successor = bitmap->successor;
@@ -3167,9 +3176,9 @@ BdrvDirtyBitmap *bdrv_dirty_bitmap_abdicate(BlockDriverState *bs,
  * we may wish to re-join the parent and child/successor.
  * The merged parent will be un-frozen, but not explicitly re-enabled.
  */
-BdrvDirtyBitmap *bdrv_reclaim_dirty_bitmap(BlockDriverState *bs,
-                                           BdrvDirtyBitmap *parent,
-                                           Error **errp)
+static BdrvDirtyBitmap *bdrv_reclaim_dirty_bitmap(BlockDriverState *bs,
+                                                  BdrvDirtyBitmap *parent,
+                                                  Error **errp)
 {
     BdrvDirtyBitmap *successor = parent->successor;
 
@@ -3186,6 +3195,50 @@ BdrvDirtyBitmap *bdrv_reclaim_dirty_bitmap(BlockDriverState *bs,
     parent->successor = NULL;
 
     return parent;
+}
+
+static BdrvDirtyBitmap *bdrv_free_bitmap_successor(BlockDriverState *bs,
+                                                   BdrvDirtyBitmap *parent)
+{
+    assert(!parent->successor_refcount);
+
+    switch (parent->act) {
+    case SUCCESSOR_ACTION_RECLAIM:
+        return bdrv_reclaim_dirty_bitmap(bs, parent, NULL);
+    case SUCCESSOR_ACTION_ABDICATE:
+        return bdrv_dirty_bitmap_abdicate(bs, parent, NULL);
+    case SUCCESSOR_ACTION_UNDEFINED:
+    default:
+        g_assert_not_reached();
+    }
+}
+
+BdrvDirtyBitmap *bdrv_frozen_bitmap_decref(BlockDriverState *bs,
+                                           BdrvDirtyBitmap *parent,
+                                           int ret)
+{
+    assert(bdrv_dirty_bitmap_frozen(parent));
+    assert(parent->successor);
+
+    if (ret) {
+        parent->act = SUCCESSOR_ACTION_RECLAIM;
+    } else if (parent->act != SUCCESSOR_ACTION_RECLAIM) {
+        parent->act = SUCCESSOR_ACTION_ABDICATE;
+    }
+
+    parent->successor_refcount--;
+    if (parent->successor_refcount == 0) {
+        return bdrv_free_bitmap_successor(bs, parent);
+    }
+    return parent;
+}
+
+void bdrv_dirty_bitmap_incref(BdrvDirtyBitmap *parent)
+{
+    assert(bdrv_dirty_bitmap_frozen(parent));
+    assert(parent->successor);
+
+    parent->successor_refcount++;
 }
 
 /**

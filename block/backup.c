@@ -240,6 +240,12 @@ static void backup_complete(BlockJob *job, void *opaque)
 
     bdrv_unref(s->target);
 
+    if (s->sync_bitmap) {
+        BdrvDirtyBitmap *bm;
+        bm = bdrv_frozen_bitmap_decref(job->bs, s->sync_bitmap, data->ret);
+        assert(bm);
+    }
+
     block_job_completed(job, data->ret);
     g_free(data);
 }
@@ -428,18 +434,6 @@ static void coroutine_fn backup_run(void *opaque)
     qemu_co_rwlock_wrlock(&job->flush_rwlock);
     qemu_co_rwlock_unlock(&job->flush_rwlock);
 
-    if (job->sync_bitmap) {
-        BdrvDirtyBitmap *bm;
-        if (ret < 0) {
-            /* Merge the successor back into the parent, delete nothing. */
-            bm = bdrv_reclaim_dirty_bitmap(bs, job->sync_bitmap, NULL);
-            assert(bm);
-        } else {
-            /* Everything is fine, delete this bitmap and install the backup. */
-            bm = bdrv_dirty_bitmap_abdicate(bs, job->sync_bitmap, NULL);
-            assert(bm);
-        }
-    }
     hbitmap_free(job->bitmap);
 
     bdrv_iostatus_disable(target);
@@ -543,6 +537,6 @@ void backup_start(BlockDriverState *bs, BlockDriverState *target,
 
  error:
     if (sync_bitmap) {
-        bdrv_reclaim_dirty_bitmap(bs, sync_bitmap, NULL);
+        bdrv_frozen_bitmap_decref(bs, sync_bitmap, -ECANCELED);
     }
 }

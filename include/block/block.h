@@ -457,12 +457,10 @@ BdrvDirtyBitmap *bdrv_create_dirty_bitmap(BlockDriverState *bs,
 int bdrv_dirty_bitmap_create_successor(BlockDriverState *bs,
                                        BdrvDirtyBitmap *bitmap,
                                        Error **errp);
-BdrvDirtyBitmap *bdrv_dirty_bitmap_abdicate(BlockDriverState *bs,
-                                            BdrvDirtyBitmap *bitmap,
-                                            Error **errp);
-BdrvDirtyBitmap *bdrv_reclaim_dirty_bitmap(BlockDriverState *bs,
-                                           BdrvDirtyBitmap *bitmap,
-                                           Error **errp);
+BdrvDirtyBitmap *bdrv_frozen_bitmap_decref(BlockDriverState *bs,
+                                           BdrvDirtyBitmap *parent,
+                                           int ret);
+void bdrv_dirty_bitmap_incref(BdrvDirtyBitmap *parent);
 BdrvDirtyBitmap *bdrv_find_dirty_bitmap(BlockDriverState *bs,
                                         const char *name);
 void bdrv_dirty_bitmap_make_anon(BdrvDirtyBitmap *bitmap);
