@@ -141,6 +141,51 @@ _timestamp()
     echo -n " [$now]"
 }
 
+_okfile()
+{
+    echo "ts/${IMGPROTO}/${IMGFMT}/${1}.ok"
+}
+
+# _hasdep <seq> <dep>
+_hasdep()
+{
+    grep -q "^${1}.*${2}" "${source_iotests}/group"
+}
+
+# _skippable <seq>
+_skippable()
+{
+    tsfile=$(_okfile "${1}")
+    deps=(${QEMU_IMG} \
+              ${QEMU_IO} \
+              "${source_iotests}/${1}" \
+              "${source_iotests}/${1}.out" \
+              "${source_iotests}/common" \
+              "${source_iotests}/common.rc" \
+              "${source_iotests}/common.env" \
+              "${source_iotests}/common.config")
+
+    if _hasdep "${1}" "scm"; then
+        deps+=("${SOCKET_SCM_HELPER}")
+    fi
+
+    if _hasdep "${1}" "nbd" || [ "$IMGPROTO" = "nbd" ]; then
+        deps+=("${QEMU_NBD}")
+    fi
+
+    if _hasdep "${1}" "qemu"; then
+        deps+=("${QEMU}")
+    fi
+
+    if [ ! -e "${tsfile}" ]; then return 1; fi
+    for dep in "${deps[@]}"; do
+        if [ "${tsfile}" -ot "${dep}" ]; then return 1; fi
+    done
+
+    # Looks skippable, .ok file is newer than all external dependencies.
+    return 0
+}
+
 _wrapup()
 {
     # for hangcheck ...
@@ -268,6 +313,10 @@ do
         echo " - expunged"
         rm -f $seq.out.bad
         echo "/^$seq\$/d" >>$tmp.expunged
+
+    elif [ "${ts_skip}" == "true" ] && _skippable "${seq}"; then
+        echo "         [skip] (Results are recent)"
+
     elif [ ! -f "$source_iotests/$seq" ]
     then
         echo " - no such test?"
@@ -275,7 +324,8 @@ do
     else
         # really going to try and run this one
         #
-        rm -f $seq.out.bad
+        tsfile="$(_okfile ${seq})"
+        rm -f $seq.out.bad "${tsfile}"
         lasttime=`sed -n -e "/^$seq /s/.* //p" <check.time`
         if [ "X$lasttime" != X ]; then
                 echo -n " ${lasttime}s ..."
@@ -340,6 +390,10 @@ do
                     then
                         :
                     else
+                        if [ ! -d "$(dirname ${tsfile})" ]; then
+                            mkdir -p "$(dirname ${tsfile})"
+                        fi
+                        touch "${tsfile}"
                         echo "$seq `expr $stop - $start`" >>$tmp.time
                     fi
                 else

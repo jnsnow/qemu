@@ -161,6 +161,8 @@ check options
     -T                  output timestamps
     -r                  randomize test order
     -c mode             cache mode
+    -ts                 timestamp skip: skip tests when already ran and
+                                   no dependencies have changed on disk.
 
 testlist options
     -g group[,group...]        include tests from these groups
@@ -319,6 +321,10 @@ testlist options
             xpand=false
             ;;
 
+        -ts)
+            ts_skip=true
+            xpand=false
+            ;;
         -v)
             verbose=true
             xpand=false
