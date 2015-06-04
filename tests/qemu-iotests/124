@@ -249,26 +249,28 @@ class TestIncrementalBackup(iotests.QMPTestCase):
         self.vm.hmp_qemu_io(drive, 'flush')
 
 
-    def do_incremental_simple(self, **kwargs):
+    def do_delta_simple(self, create_delta, **kwargs):
         self.create_anchor_backup()
         self.add_bitmap('bitmap0', self.drives[0], **kwargs)
 
         # Sanity: Create a "hollow" incremental backup
-        self.create_incremental()
+        create_delta()
         # Three writes: One complete overwrite, one new segment,
         # and one partial overlap.
         self.hmp_io_writes(self.drives[0]['id'], (('0xab', 0, 512),
                                                   ('0xfe', '16M', '256k'),
                                                   ('0x64', '32736k', '64k')))
-        self.create_incremental()
+        create_delta()
         # Three more writes, one of each kind, like above
         self.hmp_io_writes(self.drives[0]['id'], (('0x9a', 0, 512),
                                                   ('0x55', '8M', '352k'),
                                                   ('0x78', '15872k', '1M')))
-        self.create_incremental()
+        create_delta()
         self.vm.shutdown()
         self.check_backups()
 
+    def do_incremental_simple(self, **kwargs):
+        return self.do_delta_simple(self.create_incremental, **kwargs)
 
     def test_incremental_simple(self):
         '''
@@ -299,6 +301,10 @@ class TestIncrementalBackup(iotests.QMPTestCase):
         of 128KiB instead of the present default of 64KiB.
         '''
         return self.do_incremental_simple(granularity=131072)
+
+
+    def test_differential_simple(self):
+        return self.do_delta_simple(self.create_differential)
 
 
     def test_incremental_transaction(self):
