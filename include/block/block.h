@@ -456,6 +456,10 @@ BdrvDirtyBitmap *bdrv_create_dirty_bitmap(BlockDriverState *bs,
                                           uint32_t granularity,
                                           const char *name,
                                           Error **errp);
+BdrvDirtyBitmap *bdrv_copy_dirty_bitmap(BlockDriverState *bs,
+                                        const BdrvDirtyBitmap *bitmap,
+                                        const char *name,
+                                        Error **errp);
 int bdrv_dirty_bitmap_create_successor(BlockDriverState *bs,
                                        BdrvDirtyBitmap *bitmap,
                                        Error **errp);

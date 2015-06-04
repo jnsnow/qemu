@@ -3114,6 +3114,32 @@ BdrvDirtyBitmap *bdrv_create_dirty_bitmap(BlockDriverState *bs,
     return bitmap;
 }
 
+BdrvDirtyBitmap *bdrv_copy_dirty_bitmap(BlockDriverState *bs,
+                                        const BdrvDirtyBitmap *bitmap,
+                                        const char *name,
+                                        Error **errp)
+{
+    BdrvDirtyBitmap *new_bitmap;
+
+    if (name && bdrv_find_dirty_bitmap(bs, name)) {
+        error_setg(errp, "Bitmap already exists: %s", name);
+        return NULL;
+    }
+
+    new_bitmap = g_new0(BdrvDirtyBitmap, 1);
+    new_bitmap->bitmap = hbitmap_copy(bitmap->bitmap);
+    new_bitmap->size = bitmap->size;
+    new_bitmap->name = g_strdup(name);
+
+    if (bitmap->successor) {
+        /* NB: 2nd arg is read-only. */
+        hbitmap_merge(new_bitmap->bitmap, bitmap->successor->bitmap);
+    }
+
+    QLIST_INSERT_HEAD(&bs->dirty_bitmaps, new_bitmap, list);
+    return new_bitmap;
+}
+
 bool bdrv_dirty_bitmap_frozen(BdrvDirtyBitmap *bitmap)
 {
     return bitmap->successor;
