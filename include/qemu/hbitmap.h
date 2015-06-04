@@ -88,6 +88,15 @@ void hbitmap_truncate(HBitmap *hb, uint64_t size);
 bool hbitmap_merge(HBitmap *a, const HBitmap *b);
 
 /**
+ * hbitmap_copy:
+ * @hb: The bitmap to copy.
+ * @return The newly copied bitmap.
+ *
+ * Given a bitmap, create a new one with all the same bits set.
+ */
+HBitmap *hbitmap_copy(const HBitmap *hb);
+
+/**
  * hbitmap_empty:
  * @hb: HBitmap to operate on.
  *

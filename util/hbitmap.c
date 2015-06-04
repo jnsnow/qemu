@@ -93,6 +93,9 @@ struct HBitmap {
 
     /* The length of each levels[] array. */
     uint64_t sizes[HBITMAP_LEVELS];
+
+    /* NB: If any pointers are introduced into this structure, take care to
+     * update hbitmap_copy() accordingly. */
 };
 
 /* Advance hbi to the next nonzero word and return it.  hbi->pos
@@ -479,4 +482,18 @@ bool hbitmap_merge(HBitmap *a, const HBitmap *b)
     }
 
     return true;
+}
+
+
+HBitmap *hbitmap_copy(const HBitmap *bitmap)
+{
+    int i;
+    HBitmap *hb = g_memdup(bitmap, sizeof(HBitmap));
+
+    for (i = HBITMAP_LEVELS - 1; i >= 0; i--) {
+        hb->levels[i] = g_memdup(bitmap->levels[i],
+                                 hb->sizes[i] * sizeof(unsigned long));
+    }
+
+    return hb;
 }
