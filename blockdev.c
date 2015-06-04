@@ -2012,6 +2012,40 @@ static void block_dirty_bitmap_add_abort(BlkActionState *common)
     }
 }
 
+static void block_dirty_bitmap_copy_prepare(BlkActionState *common,
+                                            Error **errp)
+{
+    Error *local_err = NULL;
+    BlockDirtyBitmapCopy *action;
+    BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
+                                             common, common);
+
+    action = common->action->block_dirty_bitmap_copy;
+    /* AIO context taken (and released) within qmp_block_dirty_bitmap_copy */
+    qmp_block_dirty_bitmap_copy(action->node, action->source,
+                                action->dest, &local_err);
+
+    if (!local_err) {
+        state->prepared = true;
+    } else {
+        error_propagate(errp, local_err);
+    }
+}
+
+static void block_dirty_bitmap_copy_abort(BlkActionState *common)
+{
+    BlockDirtyBitmapCopy *action;
+    BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
+                                             common, common);
+
+    action = common->action->block_dirty_bitmap_copy;
+    if (state->prepared) {
+        qmp_block_dirty_bitmap_remove(action->node,
+                                      action->source,
+                                      &error_abort);
+    }
+}
+
 static void block_dirty_bitmap_clear_prepare(BlkActionState *common,
                                              Error **errp)
 {
@@ -2112,6 +2146,11 @@ static const BlkActionOps actions[] = {
         .instance_size = sizeof(BlockDirtyBitmapState),
         .prepare = block_dirty_bitmap_add_prepare,
         .abort = block_dirty_bitmap_add_abort,
+    },
+    [TRANSACTION_ACTION_KIND_BLOCK_DIRTY_BITMAP_COPY] = {
+        .instance_size = sizeof(BlockDirtyBitmapState),
+        .prepare = block_dirty_bitmap_copy_prepare,
+        .abort = block_dirty_bitmap_copy_abort,
     },
     [TRANSACTION_ACTION_KIND_BLOCK_DIRTY_BITMAP_CLEAR] = {
         .instance_size = sizeof(BlockDirtyBitmapState),

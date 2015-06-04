@@ -1472,6 +1472,7 @@
 # blockdev-snapshot-internal-sync since 1.7
 # blockdev-backup since 2.3
 # block-dirty-bitmap-add since 2.4
+# block-dirty-bitmap-copy since 2.4
 # block-dirty-bitmap-clear since 2.4
 ##
 { 'union': 'TransactionAction',
@@ -1482,7 +1483,8 @@
        'abort': 'Abort',
        'blockdev-snapshot-internal-sync': 'BlockdevSnapshotInternal',
        'block-dirty-bitmap-add': 'BlockDirtyBitmapAdd',
-       'block-dirty-bitmap-clear': 'BlockDirtyBitmap'
+       'block-dirty-bitmap-clear': 'BlockDirtyBitmap',
+       'block-dirty-bitmap-copy': 'BlockDirtyBitmapCopy'
    } }
 
 ##
