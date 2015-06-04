@@ -206,7 +206,7 @@ full backup as a backing image.
         "bitmap": "bitmap0",
         "target": "incremental.0.img",
         "format": "qcow2",
-        "sync": "dirty-bitmap",
+        "sync": "incremental",
         "mode": "existing"
       }
     }
@@ -231,7 +231,7 @@ full backup as a backing image.
         "bitmap": "bitmap0",
         "target": "incremental.1.img",
         "format": "qcow2",
-        "sync": "dirty-bitmap",
+        "sync": "incremental",
         "mode": "existing"
       }
     }
@@ -271,7 +271,7 @@ full backup as a backing image.
         "bitmap": "bitmap0",
         "target": "incremental.0.img",
         "format": "qcow2",
-        "sync": "dirty-bitmap",
+        "sync": "incremental",
         "mode": "existing"
       }
     }
@@ -304,7 +304,7 @@ full backup as a backing image.
         "bitmap": "bitmap0",
         "target": "incremental.0.img",
         "format": "qcow2",
-        "sync": "dirty-bitmap",
+        "sync": "incremental",
         "mode": "existing"
       }
     }

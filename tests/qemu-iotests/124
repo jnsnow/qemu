@@ -207,7 +207,7 @@ class TestIncrementalBackup(iotests.QMPTestCase):
 
         target = self.prepare_backup(bitmap, parent)
         res = self.do_qmp_backup(device=bitmap.drive['id'],
-                                 sync='dirty-bitmap', bitmap=bitmap.name,
+                                 sync='incremental', bitmap=bitmap.name,
                                  format=bitmap.drive['fmt'], target=target,
                                  mode='existing')
         if not res:
@@ -448,10 +448,10 @@ class TestIncrementalBackup(iotests.QMPTestCase):
         # Ask for a new incremental backup per-each drive,
         # expecting drive1's backup to fail:
         transaction = [
-            transaction_drive_backup(drive0['id'], target0, sync='dirty-bitmap',
+            transaction_drive_backup(drive0['id'], target0, sync='incremental',
                                      format=drive0['fmt'], mode='existing',
                                      bitmap=dr0bm0.name),
-            transaction_drive_backup(drive1['id'], target1, sync='dirty-bitmap',
+            transaction_drive_backup(drive1['id'], target1, sync='incremental',
                                      format=drive1['fmt'], mode='existing',
                                      bitmap=dr1bm0.name),
         ]
@@ -497,7 +497,7 @@ class TestIncrementalBackup(iotests.QMPTestCase):
         self.assert_no_active_block_jobs()
         self.files.append(self.err_img)
         result = self.vm.qmp('drive-backup', device=self.drives[0]['id'],
-                             sync='dirty-bitmap', format=self.drives[0]['fmt'],
+                             sync='incremental', format=self.drives[0]['fmt'],
                              target=self.err_img)
         self.assert_qmp(result, 'error/class', 'GenericError')
 
@@ -506,7 +506,7 @@ class TestIncrementalBackup(iotests.QMPTestCase):
         self.assert_no_active_block_jobs()
         self.files.append(self.err_img)
         result = self.vm.qmp('drive-backup', device=self.drives[0]['id'],
-                             sync='dirty-bitmap', bitmap='unknown',
+                             sync='incremental', bitmap='unknown',
                              format=self.drives[0]['fmt'], target=self.err_img)
         self.assert_qmp(result, 'error/class', 'GenericError')
 
