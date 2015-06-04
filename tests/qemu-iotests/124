@@ -61,34 +61,47 @@ class Bitmap:
         self.backups = list()
 
     def base_target(self):
-        return (self.drive['backup'], None)
+        return { 'type': 'full',
+                 'target': self.drive['backup'],
+                 'reference': None }
 
-    def new_target(self, num=None):
+    def new_target(self, num=None, sync='incremental'):
         if num is None:
             num = self.num
         self.num = num + 1
         base = os.path.join(iotests.test_dir,
                             "%s.%s." % (self.drive['id'], self.name))
         suff = "%i.%s" % (num, self.drive['fmt'])
-        target = base + "inc" + suff
+        target = base + sync[:3] + suff
         reference = base + "ref" + suff
-        self.backups.append((target, reference))
-        return (target, reference)
+
+        self.backups.append({ 'type': sync,
+                              'target': target,
+                              'reference': reference })
+        return self.backups[-1]
 
     def last_target(self):
         if self.backups:
             return self.backups[-1]
         return self.base_target()
 
+    def get_backing_file(self):
+        for backup in reversed(self.backups):
+            if backup['type'] != 'differential':
+                return backup['target']
+        return self.base_target()['target']
+
+    def remove_backup(self, backup):
+        try_remove(backup['target'])
+        try_remove(backup['reference'])
+
     def del_target(self):
-        for image in self.backups.pop():
-            try_remove(image)
+        self.remove_backup(self.backups.pop())
         self.num -= 1
 
     def cleanup(self):
         for backup in self.backups:
-            for image in backup:
-                try_remove(image)
+            self.remove_backup(backup)
 
 
 class TestIncrementalBackup(iotests.QMPTestCase):
@@ -172,7 +185,7 @@ class TestIncrementalBackup(iotests.QMPTestCase):
     def make_reference_backup(self, bitmap=None):
         if bitmap is None:
             bitmap = self.bitmaps[-1]
-        _, reference = bitmap.last_target()
+        reference = bitmap.last_target()['reference']
         res = self.do_qmp_backup(device=bitmap.drive['id'], sync='full',
                                  format=bitmap.drive['fmt'], target=reference)
         self.assertTrue(res)
@@ -187,29 +200,28 @@ class TestIncrementalBackup(iotests.QMPTestCase):
         return bitmap
 
 
-    def prepare_backup(self, bitmap=None, parent=None):
+    def prepare_backup(self, bitmap=None, parent=None, sync='incremental'):
         if bitmap is None:
             bitmap = self.bitmaps[-1]
         if parent is None:
-            parent, _ = bitmap.last_target()
+            parent = bitmap.get_backing_file()
 
-        target, _ = bitmap.new_target()
+        target = bitmap.new_target(sync=sync)['target']
         self.img_create(target, bitmap.drive['fmt'], parent=parent)
         return target
 
 
-    def create_incremental(self, bitmap=None, parent=None,
-                           parentFormat=None, validate=True):
+    def create_delta(self, sync='incremental', bitmap=None, parent=None,
+                     parentFormat=None, validate=True):
         if bitmap is None:
             bitmap = self.bitmaps[-1]
         if parent is None:
-            parent, _ = bitmap.last_target()
+            parent = bitmap.get_backing_file()
 
-        target = self.prepare_backup(bitmap, parent)
-        res = self.do_qmp_backup(device=bitmap.drive['id'],
-                                 sync='incremental', bitmap=bitmap.name,
-                                 format=bitmap.drive['fmt'], target=target,
-                                 mode='existing')
+        target = self.prepare_backup(bitmap, parent, sync)
+        res = self.do_qmp_backup(device=bitmap.drive['id'], sync=sync,
+                                 bitmap=bitmap.name, format=bitmap.drive['fmt'],
+                                 target=target, mode='existing')
         if not res:
             bitmap.del_target();
             self.assertFalse(validate)
@@ -217,14 +229,19 @@ class TestIncrementalBackup(iotests.QMPTestCase):
             self.make_reference_backup(bitmap)
         return res
 
+    def create_incremental(self, *args, **kwargs):
+        return self.create_delta('incremental', *args, **kwargs)
+
+    def create_differential(self, *args, **kwargs):
+        return self.create_delta('differential', *args, **kwargs)
 
     def check_backups(self):
         for bitmap in self.bitmaps:
-            for incremental, reference in bitmap.backups:
-                self.assertTrue(iotests.compare_images(incremental, reference))
-            last = bitmap.last_target()[0]
-            self.assertTrue(iotests.compare_images(last, bitmap.drive['file']))
-
+            for backup in bitmap.backups:
+                self.assertTrue(iotests.compare_images(backup['target'],
+                                                       backup['reference']))
+            self.assertTrue(iotests.compare_images(backup['target'],
+                                                   bitmap.drive['file']))
 
     def hmp_io_writes(self, drive, patterns):
         for pattern in patterns:
