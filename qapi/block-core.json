@@ -1000,6 +1000,20 @@
   'data': { 'node': 'str', 'name': 'str' } }
 
 ##
+# @BlockDirtyBitmapCopy
+#
+# @node: name of device/node which the bitmap is tracking
+#
+# @source: name of the dirty bitmap to be copied from
+#
+# @dest: name of the new dirty bitmap to create
+#
+# Since 2.4
+##
+{ 'struct': 'BlockDirtyBitmapCopy',
+  'data': { 'node': 'str', 'source': 'str', 'dest': 'str' } }
+
+##
 # @BlockDirtyBitmapAdd
 #
 # @node: name of device/node which the bitmap is tracking
