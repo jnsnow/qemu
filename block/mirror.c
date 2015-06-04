@@ -709,9 +709,14 @@ void mirror_start(BlockDriverState *bs, BlockDriverState *target,
     bool is_none_mode;
     BlockDriverState *base;
 
-    if (mode == MIRROR_SYNC_MODE_INCREMENTAL) {
-        error_setg(errp, "Sync mode 'incremental' not supported");
+    switch (mode) {
+    case MIRROR_SYNC_MODE_INCREMENTAL:
+    case MIRROR_SYNC_MODE_DIFFERENTIAL:
+        error_setg(errp, "Sync mode \"%s\" not supported",
+                   MirrorSyncMode_lookup[mode]);
         return;
+    default:
+        break;
     }
     is_none_mode = mode == MIRROR_SYNC_MODE_NONE;
     base = mode == MIRROR_SYNC_MODE_TOP ? bs->backing_hd : NULL;

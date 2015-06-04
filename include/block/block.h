@@ -462,6 +462,7 @@ BdrvDirtyBitmap *bdrv_copy_dirty_bitmap(BlockDriverState *bs,
                                         Error **errp);
 int bdrv_dirty_bitmap_create_successor(BlockDriverState *bs,
                                        BdrvDirtyBitmap *bitmap,
+                                       MirrorSyncMode sync_mode,
                                        Error **errp);
 BdrvDirtyBitmap *bdrv_frozen_bitmap_decref(BlockDriverState *bs,
                                            BdrvDirtyBitmap *parent,

@@ -3166,7 +3166,9 @@ DirtyBitmapStatus bdrv_dirty_bitmap_status(BdrvDirtyBitmap *bitmap)
  * Requires that the bitmap is not frozen and has no successor.
  */
 int bdrv_dirty_bitmap_create_successor(BlockDriverState *bs,
-                                       BdrvDirtyBitmap *bitmap, Error **errp)
+                                       BdrvDirtyBitmap *bitmap,
+                                       MirrorSyncMode sync_mode,
+                                       Error **errp)
 {
     uint64_t granularity;
     BdrvDirtyBitmap *child;
@@ -3191,6 +3193,11 @@ int bdrv_dirty_bitmap_create_successor(BlockDriverState *bs,
     /* Install the successor and freeze the parent */
     bitmap->successor = child;
     bitmap->successor_refcount = 1;
+
+    if (sync_mode == MIRROR_SYNC_MODE_DIFFERENTIAL) {
+        bitmap->act = SUCCESSOR_ACTION_RECLAIM;
+    }
+
     return 0;
 }
 

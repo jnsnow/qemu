@@ -390,7 +390,8 @@ static void coroutine_fn backup_run(void *opaque)
             qemu_coroutine_yield();
             job->common.busy = true;
         }
-    } else if (job->sync_mode == MIRROR_SYNC_MODE_INCREMENTAL) {
+    } else if ((job->sync_mode == MIRROR_SYNC_MODE_INCREMENTAL) ||
+               (job->sync_mode == MIRROR_SYNC_MODE_DIFFERENTIAL)) {
         ret = backup_run_incremental(job);
     } else {
         /* Both FULL and TOP SYNC_MODE's require copying.. */
@@ -510,15 +511,18 @@ void backup_start(BlockDriverState *bs, BlockDriverState *target,
         return;
     }
 
-    if (sync_mode == MIRROR_SYNC_MODE_INCREMENTAL) {
+    if ((sync_mode == MIRROR_SYNC_MODE_INCREMENTAL) ||
+        (sync_mode == MIRROR_SYNC_MODE_DIFFERENTIAL)) {
         if (!sync_bitmap) {
-            error_setg(errp, "must provide a valid bitmap name for "
-                             "\"incremental\" sync mode");
+            error_setg(errp,
+                       "must provide a valid bitmap name for \"%s\" sync mode",
+                       MirrorSyncMode_lookup[sync_mode]);
             return;
         }
 
         /* Create a new bitmap, and freeze/disable this one. */
-        if (bdrv_dirty_bitmap_create_successor(bs, sync_bitmap, errp) < 0) {
+        if (bdrv_dirty_bitmap_create_successor(bs, sync_bitmap,
+                                               sync_mode, errp) < 0) {
             return;
         }
     } else if (sync_bitmap) {
@@ -548,8 +552,7 @@ void backup_start(BlockDriverState *bs, BlockDriverState *target,
     job->on_target_error = on_target_error;
     job->target = target;
     job->sync_mode = sync_mode;
-    job->sync_bitmap = sync_mode == MIRROR_SYNC_MODE_INCREMENTAL ?
-                       sync_bitmap : NULL;
+    job->sync_bitmap = sync_bitmap;
     job->common.len = len;
     job->common.co = qemu_coroutine_create(backup_run);
     qemu_coroutine_enter(job->common.co, job);
