@@ -2445,6 +2445,28 @@ void qmp_block_dirty_bitmap_add(const char *node, const char *name,
     aio_context_release(aio_context);
 }
 
+void qmp_block_dirty_bitmap_copy(const char *node, const char *source,
+                                 const char *dest, Error **errp)
+{
+    AioContext *aio_context;
+    BlockDriverState *bs;
+    BdrvDirtyBitmap *bitmap;
+
+    if (!dest || dest[0] == '\0') {
+        error_setg(errp, "Bitmap name cannot be empty");
+        return;
+    }
+
+    bitmap = block_dirty_bitmap_lookup(node, source, &bs, &aio_context, errp);
+    if (!bitmap || !bs) {
+        return;
+    }
+
+    /* Duplicate name checking is left to bdrv_copy_dirty_bitmap */
+    bdrv_copy_dirty_bitmap(bs, bitmap, dest, errp);
+    aio_context_release(aio_context);
+}
+
 void qmp_block_dirty_bitmap_remove(const char *node, const char *name,
                                    Error **errp)
 {

@@ -1347,6 +1347,36 @@ Example:
 EQMP
 
     {
+        .name       = "block-dirty-bitmap-copy",
+        .args_type  = "node:B,source:s,dest:s",
+        .mhandler.cmd_new = qmp_marshal_input_block_dirty_bitmap_copy,
+    },
+
+SQMP
+
+block-dirty-bitmap-copy
+-----------------------
+Since 2.4
+
+Copy a dirty bitmap from 'source' to a new bitmap 'dest', then start tracking
+new writes immediately.
+
+Arguments:
+
+- "node": device/node on which to create dirty bitmap (json-string)
+- "source": name of the dirty bitmap to be copied (json-string)
+- "dest": name of the dirty bitmap to be copied (json-string)
+
+Example:
+
+-> { "execute": "block-dirty-bitmap-copy", "arguments": { "node": "drive0",
+                                                          "source": "bitmap0",
+                                                          "dest": "bitmap1" } }
+<- { "return": {} }
+
+EQMP
+
+    {
         .name       = "block-dirty-bitmap-remove",
         .args_type  = "node:B,name:s",
         .mhandler.cmd_new = qmp_marshal_input_block_dirty_bitmap_remove,

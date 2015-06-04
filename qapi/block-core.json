@@ -1043,6 +1043,22 @@
   'data': 'BlockDirtyBitmapAdd' }
 
 ##
+# @block-dirty-bitmap-copy
+#
+# Copy a dirty bitmap into a new dirty bitmap
+#
+# Returns: nothing on success
+#          If @node is not a valid block device or node, DeviceNotFound
+#          If @source is not a valid bitmap, GenericError
+#          if @dest is not a valid bitmap name, GenericError
+#          if @dest is already taken, GenericError
+#
+# Since 2.4
+##
+{ 'command': 'block-dirty-bitmap-copy',
+  'data': 'BlockDirtyBitmapCopy' }
+
+##
 # @block-dirty-bitmap-remove
 #
 # Remove a dirty bitmap on the node
