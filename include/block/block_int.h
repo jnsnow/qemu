@@ -630,6 +630,22 @@ void backup_start(BlockDriverState *bs, BlockDriverState *target,
                   BlockCompletionFunc *cb, void *opaque,
                   Error **errp);
 
+/*
+ * backup_action_start:
+ * @job: A BackupBlockJob we wish to specify is part of a transaction.
+ * Allows cleanup mechanisms to occur later via backup_action_complete.
+ */
+void *backup_action_start(BlockJob *job);
+
+/*
+ * backup_transaction_complete:
+ * @bs: The BlockDriverState associated with the backup job.
+ * @opaque: As returned from backup_action_start.
+ * @ret: The collective return code for the entire transaction.
+ *       Expects zero for success, non-zero for an error otherwise.
+ */
+void backup_action_complete(BlockDriverState *bs, void *opaque, int ret);
+
 void blk_dev_change_media_cb(BlockBackend *blk, bool load);
 bool blk_dev_has_removable_media(BlockBackend *blk);
 void blk_dev_eject_request(BlockBackend *blk, bool force);
