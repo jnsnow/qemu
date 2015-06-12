@@ -331,8 +331,7 @@ static void  ahci_port_write(AHCIState *s, int port, int offset, uint32_t val)
     }
 }
 
-static uint64_t ahci_mem_read(void *opaque, hwaddr addr,
-                              unsigned size)
+static uint64_t ahci_mem_read_32(void *opaque, hwaddr addr)
 {
     AHCIState *s = opaque;
     uint32_t val = 0;
@@ -367,6 +366,24 @@ static uint64_t ahci_mem_read(void *opaque, hwaddr addr,
     return val;
 }
 
+
+static uint64_t ahci_mem_read(void *opaque, hwaddr addr, unsigned size)
+{
+    hwaddr aligned = addr & ~0x3;
+    int ofst = addr - aligned;
+    uint64_t lo = ahci_mem_read_32(opaque, aligned);
+    uint64_t hi;
+
+    /* if 1/2/4 byte read does not cross 4 byte boundary */
+    if (ofst + size <= 4) {
+        return lo >> (ofst * 8);
+    }
+
+    /* If the 64bit read is unaligned, we will produce undefined
+     * results. AHCI does not support unaligned 64bit reads. */
+    hi = ahci_mem_read_32(opaque, aligned + 4);
+    return (hi << 32) | lo;
+}
 
 
 static void ahci_mem_write(void *opaque, hwaddr addr,
