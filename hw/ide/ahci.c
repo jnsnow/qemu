@@ -1332,6 +1332,23 @@ static void ahci_restart_dma(IDEDMA *dma)
 }
 
 /**
+ * IDE/PIO restarts are handled by the core layer, but NCQ commands
+ * need an extra kick from the AHCI HBA.
+ */
+static void ahci_restart(IDEDMA *dma)
+{
+    AHCIDevice *ad = DO_UPCAST(AHCIDevice, dma, dma);
+    int i;
+
+    for (i = 0; i < AHCI_MAX_CMDS; i++) {
+        NCQTransferState *ncq_tfs = &ad->ncq_tfs[i];
+        if (ncq_tfs->halt) {
+            execute_ncq_command(ncq_tfs);
+        }
+    }
+}
+
+/**
  * Called in DMA R/W chains to read the PRDT, utilizing ahci_populate_sglist.
  * Not currently invoked by PIO R/W chains,
  * which invoke ahci_populate_sglist via ahci_start_transfer.
@@ -1419,6 +1436,7 @@ static void ahci_irq_set(void *opaque, int n, int level)
 
 static const IDEDMAOps ahci_dma_ops = {
     .start_dma = ahci_start_dma,
+    .restart = ahci_restart,
     .restart_dma = ahci_restart_dma,
     .start_transfer = ahci_start_transfer,
     .prepare_buf = ahci_dma_prepare_buf,

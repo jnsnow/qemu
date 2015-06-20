@@ -436,6 +436,7 @@ struct IDEDMAOps {
     DMAInt32Func *prepare_buf;
     DMAu32Func *commit_buf;
     DMAIntFunc *rw_buf;
+    DMAVoidFunc *restart;
     DMAVoidFunc *restart_dma;
     DMAStopFunc *set_inactive;
     DMAVoidFunc *cmd_done;
