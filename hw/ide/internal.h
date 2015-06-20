@@ -499,6 +499,7 @@ struct IDEDevice {
 #define IDE_RETRY_READ  0x20
 #define IDE_RETRY_FLUSH 0x40
 #define IDE_RETRY_TRIM 0x80
+#define IDE_RETRY_HBA  0x100
 
 static inline IDEState *idebus_active_if(IDEBus *bus)
 {
