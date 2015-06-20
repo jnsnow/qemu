@@ -1140,9 +1140,9 @@ static void test_migrate_sanity(void)
 }
 
 /**
- * DMA Migration test: Write a pattern, migrate, then read.
+ * Simple migration test: Write a pattern, migrate, then read.
  */
-static void test_migrate_dma(void)
+static void ahci_migrate_simple(uint8_t cmd_read, uint8_t cmd_write)
 {
     AHCIQState *src, *dst;
     uint8_t px;
@@ -1181,6 +1181,16 @@ static void test_migrate_dma(void)
     ahci_shutdown(dst);
     g_free(rx);
     g_free(tx);
+}
+
+static void test_migrate_dma(void)
+{
+    ahci_migrate_simple(CMD_READ_DMA, CMD_WRITE_DMA);
+}
+
+static void test_migrate_ncq(void)
+{
+    ahci_migrate_simple(READ_FPDMA_QUEUED, WRITE_FPDMA_QUEUED);
 }
 
 /**
@@ -1665,6 +1675,7 @@ int main(int argc, char **argv)
     qtest_add_func("/ahci/reset", test_reset);
 
     qtest_add_func("/ahci/io/ncq/simple", test_ncq_simple);
+    qtest_add_func("/ahci/migrate/ncq/simple", test_migrate_ncq);
 
     ret = g_test_run();
 
