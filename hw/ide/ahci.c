@@ -1048,6 +1048,8 @@ static void process_ncq_command(AHCIState *s, int port, uint8_t *cmd_fis,
             ncq_tfs->lba, ncq_tfs->lba + ncq_tfs->sector_count - 1,
             ide_state->nb_sectors - 1);
 
+    ide_state->error = 0;
+
     switch(ncq_fis->command) {
         case READ_FPDMA_QUEUED:
             DPRINTF(port, "NCQ reading %d sectors from LBA %"PRId64", "
