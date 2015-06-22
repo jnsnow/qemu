@@ -55,8 +55,11 @@ static void bmdma_start_dma(IDEDMA *dma, IDEState *s,
 /**
  * Return the number of bytes successfully prepared.
  * -1 on error.
+ * BUG?: Does not currently heed the 'limit' parameter because
+ *       it is not clear what the correct behavior here is,
+ *       see tests/ide-test.c
  */
-static int32_t bmdma_prepare_buf(IDEDMA *dma, int is_write)
+static int32_t bmdma_prepare_buf(IDEDMA *dma, int64_t limit, int is_write)
 {
     BMDMAState *bm = DO_UPCAST(BMDMAState, dma, dma);
     IDEState *s = bmdma_active_if(bm);
