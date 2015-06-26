@@ -959,13 +959,25 @@ static void ncq_cb(void *opaque, int ret)
         return;
     }
 
+    ncq_tfs->halt = false;
     if (ret < 0) {
-        ncq_err(ncq_tfs);
+        bool is_read = ncq_tfs->cmd == READ_FPDMA_QUEUED;
+        BlockErrorAction action = blk_get_error_action(ide_state->blk,
+                                                       is_read, -ret);
+        if (action == BLOCK_ERROR_ACTION_STOP) {
+            ncq_tfs->halt = true;
+            ide_state->bus->error_status = IDE_RETRY_HBA;
+        } else if (action == BLOCK_ERROR_ACTION_REPORT) {
+            ncq_err(ncq_tfs);
+        }
+        blk_error_action(ide_state->blk, action, is_read, -ret);
     } else {
         ide_state->status = READY_STAT | SEEK_STAT;
     }
 
-    ncq_finish(ncq_tfs);
+    if (!ncq_tfs->halt) {
+        ncq_finish(ncq_tfs);
+    }
 }
 
 static int is_ncq(uint8_t ata_cmd)
@@ -1042,6 +1054,7 @@ static void process_ncq_command(AHCIState *s, int port, uint8_t *cmd_fis,
     }
 
     ncq_tfs->used = 1;
+    ncq_tfs->halt = false;
     ncq_tfs->drive = ad;
     ncq_tfs->slot = slot;
     ncq_tfs->cmd = ncq_fis->command;
