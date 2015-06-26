@@ -499,7 +499,7 @@ static int ide_nop_int(IDEDMA *dma, int x)
     return 0;
 }
 
-static int32_t ide_nop_int32(IDEDMA *dma, int x)
+static int32_t ide_nop_int32(IDEDMA *dma, int64_t l, int x)
 {
     return 0;
 }
