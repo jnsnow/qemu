@@ -721,7 +721,7 @@ static void ahci_post_fis_pio(AHCIDevice *ad)
     ahci_trigger_irq(ad->hba, ad, PORT_IRQ_PIOS_FIS);
 }
 
-static void ahci_prepare_fis_pio(AHCIDevice *ad, uint16_t len)
+static void ahci_prepare_fis_pio(AHCIDevice *ad, uint16_t len, bool is_write)
 {
     AHCIPortRegs *pr = &ad->port_regs;
     uint8_t *pio_fis;
@@ -735,6 +735,7 @@ static void ahci_prepare_fis_pio(AHCIDevice *ad, uint16_t len)
 
     pio_fis[0] = SATA_FIS_TYPE_PIO_SETUP;
     pio_fis[1] = (ad->hba->control_regs.irqstatus ? (1 << 6) : 0);
+    pio_fis[1] |= is_write ? 0 : (1 << 5);
     pio_fis[2] = 0;
     pio_fis[3] = 0;
     pio_fis[4] = s->sector;
@@ -1266,7 +1267,7 @@ static void ahci_start_transfer(IDEDMA *dma)
     int is_atapi = opts & AHCI_CMD_ATAPI;
     int has_sglist = 0;
 
-    ahci_prepare_fis_pio(ad, size);
+    ahci_prepare_fis_pio(ad, !is_write, size);
 
     if (is_atapi && !ad->done_atapi_packet) {
         /* already prepopulated iobuffer */
