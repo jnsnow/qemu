@@ -698,6 +698,55 @@ static void ahci_write_fis_sdb(AHCIState *s, NCQTransferState *ncq_tfs)
     }
 }
 
+typedef struct DMASetupFIS {
+    uint8_t type;
+    uint8_t flags;
+    uint16_t reserved;
+    uint64_t dma_buffer_id;
+    uint32_t reserved2;
+    uint32_t dma_buffer_offset;
+    uint32_t dma_transfer_count;
+    uint32_t reserved3;
+} __attribute__((__packed__)) DMASetupFIS;
+
+/* need is_write or is_read (etc) to indicate directionality of data and sender,
+ * need "is_ncq" to determine behavior of intr bit
+ * xfer count I guess is when we're exhausted... ? or about to be ... ? */
+static void ahci_write_fis_dma_setup(AHCIDevice *ad)
+{
+    DMASetupFIS *dma_fis = (DMASetupFIS *)&ad->res_fis[RES_FIS_DSFIS];
+
+    /* Device to Host FIS */
+    memset(dma_fis, 0x00, sizeof(DMASetupFIS));
+    dma_fis->type = 0x41;
+    /* SATA 10.5.9.1 */
+    /* PMPort */
+    /* D: 1 (tx to rx) --- Device-to-host, i.e, read  (cannot use A bit)
+     *    0 (rx to rx) --- host-to-device, i.e, write (can use A bit) */
+    /* D==1 "Transmitter to Receiver" i.e, "I am about to send you data"
+     * D==0 "Receiver to Transmitter" i.e, "I am expecting data" */
+    /* I: Interrupt bit (Sata drive) will send an interrupt if DMA count is exhausted (10.5.9.1)
+          Shall be cleared to 0 for NCQ (SATA 13.6.2.2 Data Delivery Mechanism)
+    */
+    /* A:
+     *    If we support NCQ, A shall be ON if this is a host-to-device transfer;
+     *    see SATA 10.5.9.4.2 (Auto Activate)
+     *    and SATA 13.3.3 (Enable/disable DMA Setup FIS auto-activate optimization)
+     *    and SATA 13.6.2.2 (Data delivery mechanism)
+     *    and AHCI 3.1.1  (CAP - HBA abilities, SNCQ bit)
+     */
+    /* uint16_t reserved */
+    /* uint64_t dma_buff_id ... should be TAG/SLOT */
+    /* uint32_t reserved */
+    /* uint32_t buffer_offset -- byte offset into the buffer */
+    /* 13.3.2, 13.2.2 -- non-zero offsets -- if not enabled or not supported
+    /* uint32_t transfer_count -- xfer count. ez cheeze lemon squeeze */
+
+    if (intr) {
+        ahci_trigger_irq(ad->hba, ad, PORT_IRQ_DMAS_FIS);
+    }
+}
+
 static void ahci_post_fis_pio(AHCIDevice *ad)
 {
     uint8_t *pio_fis;
@@ -988,6 +1037,7 @@ static void execute_ncq_command(NCQTransferState *ncq_tfs)
 
         dma_acct_start(ide_state->blk, &ncq_tfs->acct,
                        &ncq_tfs->sglist, BLOCK_ACCT_READ);
+        ahci_write_fis_dma_setup(ncq_tfs->drive);
         ncq_tfs->aiocb = dma_blk_read(ide_state->blk, &ncq_tfs->sglist,
                                       ncq_tfs->lba, ncq_cb, ncq_tfs);
         break;
@@ -1000,6 +1050,7 @@ static void execute_ncq_command(NCQTransferState *ncq_tfs)
 
         dma_acct_start(ide_state->blk, &ncq_tfs->acct,
                        &ncq_tfs->sglist, BLOCK_ACCT_WRITE);
+        ahci_write_fis_dma_setup(ncq_tfs->drive);
         ncq_tfs->aiocb = dma_blk_write(ide_state->blk, &ncq_tfs->sglist,
                                        ncq_tfs->lba, ncq_cb, ncq_tfs);
         break;
@@ -1311,6 +1362,9 @@ static void ahci_start_dma(IDEDMA *dma, IDEState *s,
 {
     AHCIDevice *ad = DO_UPCAST(AHCIDevice, dma, dma);
     DPRINTF(ad->port_no, "\n");
+
+    ahci_write_fis_dma_setup(ad);
+
     s->io_buffer_offset = 0;
     dma_cb(s, 0);
 }
