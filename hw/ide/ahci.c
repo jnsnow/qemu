@@ -698,7 +698,30 @@ static void ahci_write_fis_sdb(AHCIState *s, NCQTransferState *ncq_tfs)
     }
 }
 
-static void ahci_write_fis_pio(AHCIDevice *ad, uint16_t len)
+static void ahci_post_fis_pio(AHCIDevice *ad)
+{
+    uint8_t *pio_fis;
+    IDEState *s = &ad->port.ifs[0];
+    AHCIPortRegs *pr = &ad->port_regs;
+
+    g_assert(ad->res_fis && (pr->cmd & PORT_CMD_FIS_RX));
+    pio_fis = &ad->res_fis[RES_FIS_PSFIS];
+
+    pio_fis[1] |= (ad->hba->control_regs.irqstatus ? (1 << 6) : 0);
+    pio_fis[2] = s->status;
+    pio_fis[3] = s->error;
+
+    /* Update shadow registers: */
+    pr->tfdata = (s->error << 8) | s->status;
+
+    if (pio_fis[2] & ERR_STAT) {
+        ahci_trigger_irq(ad->hba, ad, PORT_IRQ_TF_ERR);
+    }
+
+    ahci_trigger_irq(ad->hba, ad, PORT_IRQ_PIOS_FIS);
+}
+
+static void ahci_prepare_fis_pio(AHCIDevice *ad, uint16_t len)
 {
     AHCIPortRegs *pr = &ad->port_regs;
     uint8_t *pio_fis;
@@ -712,9 +735,8 @@ static void ahci_write_fis_pio(AHCIDevice *ad, uint16_t len)
 
     pio_fis[0] = SATA_FIS_TYPE_PIO_SETUP;
     pio_fis[1] = (ad->hba->control_regs.irqstatus ? (1 << 6) : 0);
-    pio_fis[2] = s->status;
-    pio_fis[3] = s->error;
-
+    pio_fis[2] = 0;
+    pio_fis[3] = 0;
     pio_fis[4] = s->sector;
     pio_fis[5] = s->lcyl;
     pio_fis[6] = s->hcyl;
@@ -727,20 +749,10 @@ static void ahci_write_fis_pio(AHCIDevice *ad, uint16_t len)
     pio_fis[13] = (s->nsector >> 8) & 0xFF;
     pio_fis[14] = 0;
     pio_fis[15] = s->status;
-    pio_fis[16] = len & 255;
+    pio_fis[16] = len & 0xFF;
     pio_fis[17] = len >> 8;
     pio_fis[18] = 0;
     pio_fis[19] = 0;
-
-    /* Update shadow registers: */
-    pr->tfdata = (ad->port.ifs[0].error << 8) |
-        ad->port.ifs[0].status;
-
-    if (pio_fis[2] & ERR_STAT) {
-        ahci_trigger_irq(ad->hba, ad, PORT_IRQ_TF_ERR);
-    }
-
-    ahci_trigger_irq(ad->hba, ad, PORT_IRQ_PIOS_FIS);
 }
 
 static void ahci_write_fis_d2h(AHCIDevice *ad, uint8_t *cmd_fis)
@@ -1254,6 +1266,8 @@ static void ahci_start_transfer(IDEDMA *dma)
     int is_atapi = opts & AHCI_CMD_ATAPI;
     int has_sglist = 0;
 
+    ahci_prepare_fis_pio(ad, size);
+
     if (is_atapi && !ad->done_atapi_packet) {
         /* already prepopulated iobuffer */
         ad->done_atapi_packet = true;
@@ -1287,8 +1301,7 @@ out:
     s->end_transfer_func(s);
 
     if (!(s->status & DRQ_STAT)) {
-        /* done with PIO send/receive */
-        ahci_write_fis_pio(ad, le32_to_cpu(ad->cur_cmd->status));
+        ahci_post_fis_pio(ad);
     }
 }
 

@@ -470,15 +470,6 @@ void ahci_port_check_pio_sanity(AHCIQState *ahci, uint8_t port,
     memread(ahci->port[port].fb + 0x20, pio, 0x20);
     g_assert_cmphex(pio->fis_type, ==, 0x5f);
 
-    /* BUG: PIO Setup FIS as utilized by QEMU tries to fit the entire
-     * transfer size in a uint16_t field. The maximum transfer size can
-     * eclipse this; the field is meant to convey the size of data per
-     * each Data FIS, not the entire operation as a whole. For now,
-     * we will sanity check the broken case where applicable. */
-    if (buffsize <= UINT16_MAX) {
-        g_assert_cmphex(le16_to_cpu(pio->tx_count), ==, buffsize);
-    }
-
     g_free(pio);
 }
 
