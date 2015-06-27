@@ -1175,13 +1175,13 @@ static void handle_reg_h2d_fis(AHCIState *s, int port,
 
 static int handle_cmd(AHCIState *s, int port, uint8_t slot)
 {
-    IDEState *ide_state;
+    IDEState *ide_state = &s->dev[port].port.ifs[0];
     uint64_t tbl_addr;
     AHCICmdHdr *cmd;
     uint8_t *cmd_fis;
     dma_addr_t cmd_len;
 
-    if (s->dev[port].port.ifs[0].status & (BUSY_STAT|DRQ_STAT)) {
+    if (ide_state->status & (BUSY_STAT|DRQ_STAT)) {
         /* Engine currently busy, try again later */
         DPRINTF(port, "engine busy\n");
         return -1;
@@ -1195,8 +1195,6 @@ static int handle_cmd(AHCIState *s, int port, uint8_t slot)
     /* remember current slot handle for later */
     s->dev[port].cur_cmd = cmd;
 
-    /* The device we are working for */
-    ide_state = &s->dev[port].port.ifs[0];
     if (!ide_state->blk) {
         DPRINTF(port, "error: guest accessed unused port");
         return -1;
@@ -1233,13 +1231,14 @@ out:
     dma_memory_unmap(s->as, cmd_fis, cmd_len, DMA_DIRECTION_FROM_DEVICE,
                      cmd_len);
 
-    if (s->dev[port].port.ifs[0].status & (BUSY_STAT|DRQ_STAT)) {
+    if (ide_state->status & (BUSY_STAT|DRQ_STAT)) {
         /* async command, complete later */
         s->dev[port].busy_slot = slot;
         return -1;
     }
 
     /* done handling the command */
+    /* TODO: Should be !BUSY_STAT, !DRQ_STAT and !ERR_STAT */
     return 0;
 }
 
