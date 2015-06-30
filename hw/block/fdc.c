@@ -79,7 +79,7 @@ typedef struct FDFormat {
  *                       no media is inserted.
  */
 #define FDRIVE_DEFAULT FLOPPY_DRIVE_TYPE_AUTO
-#define FDRIVE_AUTO_FALLBACK FLOPPY_DRIVE_TYPE_144
+#define FDRIVE_AUTO_FALLBACK FLOPPY_DRIVE_TYPE_288
 
 /* In many cases, the total sector size of a format is enough to uniquely
  * identify it. However, there are some total sector collisions between
