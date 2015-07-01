@@ -132,7 +132,6 @@ static const FDFormat fd_formats[] = {
     { FLOPPY_DRIVE_TYPE_NONE, -1, -1, 0, 0, },
 };
 
-__attribute__((__unused__))
 static FDriveSize drive_size(FloppyDriveType drive)
 {
     switch (drive) {
@@ -287,45 +286,63 @@ static bool pick_geometry(FDrive *drv)
     BlockBackend *blk = drv->blk;
     const FDFormat *parse;
     uint64_t nb_sectors, size;
-    int i, first_match, match;
+    int i;
+    int match, size_match, type_match;
+    bool magic = drv->drive == FLOPPY_DRIVE_TYPE_AUTO;
 
     /* We can only pick a geometry if we have a diskette. */
     if (!drv->media_inserted) {
         return false;
     }
 
+    /* We need to determine the likely geometry of the inserted medium.
+     * In order of preference, we look for:
+     * (1) The same drive type and number of sectors,
+     * (2) The same diskette size and number of sectors,
+     * (3) The same number of sectors,
+     * (4) The same drive type.
+     *
+     * In all cases, matches that occur higher in the drive table will take
+     * precedence over matches that occur later in the table.
+     */
     blk_get_geometry(blk, &nb_sectors);
-    match = -1;
-    first_match = -1;
+    match = size_match = type_match = -1;
     for (i = 0; ; i++) {
         parse = &fd_formats[i];
         if (parse->drive == FLOPPY_DRIVE_TYPE_NONE) {
             break;
         }
-        if (drv->drive == parse->drive ||
-            drv->drive == FLOPPY_DRIVE_TYPE_AUTO) {
-            size = (parse->max_head + 1) * parse->max_track *
-                parse->last_sect;
-            if (nb_sectors == size) {
-                match = i;
-                break;
+        size = (parse->max_head + 1) * parse->max_track * parse->last_sect;
+        if (nb_sectors == size) {
+            if (magic || parse->drive == drv->drive) {
+                /* (1) perfect match */
+                goto out;
+            } else if (drive_size(parse->drive) == drive_size(drv->drive)) {
+                /* (2) physical size match */
+                match = (match == -1) ? i : match;
+            } else {
+                /* (3) nsectors match only */
+                size_match = (size_match == -1) ? i : size_match;
             }
-            if (first_match == -1) {
-                first_match = i;
-            }
+        } else if ((type_match == -1) &&
+                   ((parse->drive == drv->drive) ||
+                    (magic && (parse->drive == FDRIVE_AUTO_FALLBACK)))) {
+            /* (4) type matches, or type matches the autodetect default if we
+             *     are using the autodetect mechanism. */
+            type_match = i;
         }
     }
+
     if (match == -1) {
-        if (first_match == -1) {
-            /* No entry found: drive_type was NONE or we neglected to add any
-             * candidate geometries for our drive type into the fd_formats table
-             */
-            match = ARRAY_SIZE(fd_formats) - 1;
-        } else {
-            match = first_match;
-        }
-        parse = &fd_formats[match];
+        match = (size_match != -1) ? size_match : type_match;
     }
+
+    if (match == -1) {
+        /* No entry found: drive_type was NONE or we neglected to add any
+         * candidate geometries for our drive type into the fd_formats table. */
+        match = ARRAY_SIZE(fd_formats) - 1;
+    }
+    parse = &(fd_formats[match]);
 
  out:
     if (parse->max_head == 0) {
