@@ -277,6 +277,8 @@ enum {
     CMD_READ_MAX_EXT   = 0x27,
     CMD_FLUSH_CACHE    = 0xE7,
     CMD_IDENTIFY       = 0xEC,
+    CMD_PACKET         = 0xA0,
+    CMD_PACKET_ID      = 0xA1,
     /* NCQ */
     READ_FPDMA_QUEUED  = 0x60,
     WRITE_FPDMA_QUEUED = 0x61,
@@ -577,6 +579,8 @@ void ahci_command_set_size(AHCICommand *cmd, uint64_t xbytes);
 void ahci_command_set_prd_size(AHCICommand *cmd, unsigned prd_size);
 void ahci_command_set_sizes(AHCICommand *cmd, uint64_t xbytes,
                             unsigned prd_size);
+void ahci_command_set_acmd(AHCICommand *cmd, void *acmd);
+void ahci_command_enable_atapi_dma(AHCICommand *cmd);
 void ahci_command_adjust(AHCICommand *cmd, uint64_t lba_sect, uint64_t gbuffer,
                          uint64_t xbytes, unsigned prd_size);
 

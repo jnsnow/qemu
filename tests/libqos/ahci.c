@@ -74,7 +74,8 @@ AHCICommandProp ahci_command_properties[] = {
                                  .lba48 = true, .write = true, .ncq = true },
     { .cmd = CMD_READ_MAX,       .lba28 = true },
     { .cmd = CMD_READ_MAX_EXT,   .lba48 = true },
-    { .cmd = CMD_FLUSH_CACHE,    .data = false }
+    { .cmd = CMD_FLUSH_CACHE,    .data = false },
+    { .cmd = CMD_PACKET,         .data = true,  .size = 16, .atapi = true }
 };
 
 struct AHCICommand {
@@ -90,6 +91,7 @@ struct AHCICommand {
     /* Data to be transferred to the guest */
     AHCICommandHeader header;
     RegH2DFIS fis;
+    unsigned char acmd[16];
     void *atapi_cmd;
 };
 
@@ -731,6 +733,12 @@ static void command_table_init(AHCICommand *cmd)
     memset(fis->aux, 0x00, ARRAY_SIZE(fis->aux));
 }
 
+void ahci_command_enable_atapi_dma(AHCICommand *cmd)
+{
+    RegH2DFIS *fis = &(cmd->fis);
+    fis->feature_low |= 0x01;
+}
+
 AHCICommand *ahci_command_create(uint8_t command_name)
 {
     AHCICommandProp *props = ahci_command_find(command_name);
@@ -811,6 +819,16 @@ void ahci_command_set_buffer(AHCICommand *cmd, uint64_t buffer)
     cmd->buffer = buffer;
 }
 
+void ahci_command_set_acmd(AHCICommand *cmd, void *acmd)
+{
+    int i;
+    unsigned char *buf = acmd;
+
+    for (i = 0; i < 16; i++) {
+        cmd->acmd[i] = buf[i];
+    }
+}
+
 void ahci_command_set_sizes(AHCICommand *cmd, uint64_t xbytes,
                             unsigned prd_size)
 {
@@ -877,9 +895,14 @@ void ahci_command_commit(AHCIQState *ahci, AHCICommand *cmd, uint8_t port)
     g_assert((table_ptr & 0x7F) == 0x00);
     cmd->header.ctba = table_ptr;
 
-    /* Commit the command header and command FIS */
+    /* Commit the command header (part of the Command List Buffer) */
     ahci_set_command_header(ahci, port, cmd->slot, &(cmd->header));
+    /* Now, write the command table (FIS, ACMD, and PRDT) -- FIS first, */
     ahci_write_fis(ahci, cmd);
+    /* Then ATAPI CMD, if needed */
+    if (cmd->props->atapi) {
+        memwrite(table_ptr + 0x40, &(cmd->acmd), sizeof(cmd->acmd));
+    }
 
     /* Construct and write the PRDs to the command table */
     g_assert_cmphex(prdtl, ==, cmd->header.prdtl);
