@@ -1431,6 +1431,96 @@ static void test_ncq_simple(void)
     ahci_shutdown(ahci);
 }
 
+static void ahci_test_cdrom(int nsectors, bool dma)
+{
+    const size_t atapi_sector_size = 2048;
+    char cdrom_path[] = "/tmp/qtest.iso.XXXXXX";
+    AHCIQState *ahci;
+    AHCICommand *cmd;
+    unsigned char acmd[16]; /* ATAPI Command */
+    int fd;
+    ssize_t ret;
+    uint8_t port;
+    uint64_t ptr;
+    size_t filesize = 1024 * 1024;
+    size_t txsize = atapi_sector_size * nsectors;
+    unsigned char *buff; /* TX */
+    unsigned char *rx;
+
+    fd = mkstemp(cdrom_path);
+    buff = g_malloc(filesize);
+    rx = g_malloc0(txsize);
+
+    /* Generate a pattern and build a CDROM image to read from */
+    generate_pattern(buff, filesize, atapi_sector_size);
+    ret = write(fd, buff, filesize);
+    g_assert(ret == filesize);
+
+    /* Standard startup wonkery, but use ide-cd and our special iso file */
+    ahci = ahci_boot("-drive if=none,id=drive0,file=%s,format=raw "
+                     "-M q35 "
+                     "-device ide-cd,drive=drive0 ", cdrom_path);
+    ahci_pci_enable(ahci);
+    ahci_hba_enable(ahci);
+    port = ahci_port_select(ahci);
+    ahci_port_clear(ahci, port);
+
+    /* Guest Buffer */
+    ptr = ahci_alloc(ahci, txsize);
+    g_assert(ptr);
+    qmemset(ptr, 0x00, txsize);
+
+    /* Built ATAPI CMD */
+    memset(acmd, 0x00, 16);
+    acmd[0] = 0x28;
+    acmd[8] = txsize / atapi_sector_size;
+
+    /* Build & Send AHCI command */
+    cmd = ahci_command_create(0xA0);
+    ahci_command_set_buffer(cmd, ptr);
+    ahci_command_set_size(cmd, (txsize/512) * 2048);   /* ????? this will be 4 sectors by IDE assumptions */
+    ahci_command_set_acmd(cmd, acmd);     /* god speed john glenn */
+    if (dma) {
+        ahci_command_enable_atapi_dma(cmd);   /* turn on ATAPI DMA flag */
+    }
+    ahci_command_commit(ahci, cmd, port);
+    ahci_command_issue(ahci, cmd);
+    /* ahci_command_verify(ahci, cmd); */
+    ahci_command_free(cmd);
+
+    /* Reset host buffer, copy back guest buffer to host */
+    bufread(ptr, rx, txsize);
+
+    {
+        int i;
+
+        fprintf(stderr, "\n== rxΔ ==\n");
+        for (i = 0; i < txsize; i++) {
+            if (memcmp(&buff[i], &rx[i], 16) == 0) {
+                i += 15;
+                continue;
+            }
+            if (i % 16 == 0) { fprintf(stderr, "\n0x%03x: ", i); }
+            fprintf(stderr, "%02x ", rx[i]);
+        }
+    }
+
+    g_assert_cmphex(memcmp(buff, rx, txsize), ==, 0);
+
+    g_free(rx);
+    g_free(buff);
+    ahci_free(ahci, ptr);
+
+    ahci_shutdown(ahci);
+    close(fd);
+    unlink(cdrom_path);
+}
+
+static void test_cdrom_dma(void)
+{
+    ahci_test_cdrom(1, true);
+}
+
 /******************************************************************************/
 /* AHCI I/O Test Matrix Definitions                                           */
 
@@ -1688,6 +1778,8 @@ int main(int argc, char **argv)
     qtest_add_func("/ahci/migrate/ncq/simple", test_migrate_ncq);
     qtest_add_func("/ahci/io/ncq/retry", test_halted_ncq);
     qtest_add_func("/ahci/migrate/ncq/halted", test_migrate_halted_ncq);
+
+    qtest_add_func("/ahci/cdrom/dma/single", test_cdrom_dma);
 
     ret = g_test_run();
 
