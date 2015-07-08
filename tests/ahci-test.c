@@ -1521,6 +1521,21 @@ static void test_cdrom_dma(void)
     ahci_test_cdrom(1, true);
 }
 
+static void test_cdrom_dma_multi(void)
+{
+    ahci_test_cdrom(3, true);
+}
+
+static void test_cdrom_pio(void)
+{
+    ahci_test_cdrom(1, false);
+}
+
+static void test_cdrom_pio_multi(void)
+{
+    ahci_test_cdrom(3, false);
+}
+
 /******************************************************************************/
 /* AHCI I/O Test Matrix Definitions                                           */
 
@@ -1780,6 +1795,9 @@ int main(int argc, char **argv)
     qtest_add_func("/ahci/migrate/ncq/halted", test_migrate_halted_ncq);
 
     qtest_add_func("/ahci/cdrom/dma/single", test_cdrom_dma);
+    qtest_add_func("/ahci/cdrom/dma/multi", test_cdrom_dma_multi);
+    qtest_add_func("/ahci/cdrom/pio/single", test_cdrom_pio);
+    qtest_add_func("/ahci/cdrom/pio/multi", test_cdrom_pio_multi);
 
     ret = g_test_run();
 
