@@ -213,8 +213,14 @@ void ide_atapi_cmd_reply_end(IDEState *s)
 #ifdef DEBUG_IDE_ATAPI
             printf("byte_count_limit=%d\n", byte_count_limit);
 #endif
-            if (byte_count_limit == 0xffff)
+            if (byte_count_limit == 0x00) {
+                fprintf(stderr, "WARN! byte_count_limit illegally set to 0\n");
+                byte_count_limit = 0xfffe;
+            } else if (byte_count_limit == 0xffff) {
+                /* Why? ATA8 ACS3 7.21.5 says so. */
                 byte_count_limit--;
+            }
+
             size = s->packet_transfer_size;
             if (size > byte_count_limit) {
                 /* byte count limit must be even if this case */
