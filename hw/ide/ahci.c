@@ -1366,6 +1366,7 @@ static void ahci_commit_buf(IDEDMA *dma, uint32_t tx_bytes)
     AHCIDevice *ad = DO_UPCAST(AHCIDevice, dma, dma);
     IDEState *s = &ad->port.ifs[0];
 
+    s->io_buffer_offset += tx_bytes;
     tx_bytes += le32_to_cpu(ad->cur_cmd->status);
     ad->cur_cmd->status = cpu_to_le32(tx_bytes);
 
@@ -1393,7 +1394,6 @@ static int ahci_dma_rw_buf(IDEDMA *dma, int is_write)
     ahci_commit_buf(dma, l);
 
     s->io_buffer_index += l;
-    s->io_buffer_offset += l;
 
     DPRINTF(ad->port_no, "len=%#x\n", l);
 
