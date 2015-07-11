@@ -213,8 +213,16 @@ void ide_atapi_cmd_reply_end(IDEState *s)
 #ifdef DEBUG_IDE_ATAPI
             printf("byte_count_limit=%d\n", byte_count_limit);
 #endif
-            if (byte_count_limit == 0xffff)
+            if (byte_count_limit == 0x00) {
+                /* This command aborts at the /ATA/ level, not the ATAPI level.
+                 * See ATA8 ACS3 section 7.17.6.49 and 7.21.5 */
+                ide_abort_command(s);
+                return;
+            } else if (byte_count_limit == 0xffff) {
+                /* ATA8 ACS3 7.21.5 */
                 byte_count_limit--;
+            }
+
             size = s->packet_transfer_size;
             if (size > byte_count_limit) {
                 /* byte count limit must be even if this case */
