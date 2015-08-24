@@ -136,7 +136,7 @@ common options
     -v                  verbose
     -d                  debug
 
-check options
+image format options
     -raw                test raw (default)
     -bochs              test bochs
     -cloop              test cloop
@@ -148,6 +148,8 @@ check options
     -vpc                test vpc
     -vhdx               test vhdx
     -vmdk               test vmdk
+
+image protocol options
     -file               test file (default)
     -rbd                test rbd
     -sheepdog           test sheepdog
@@ -155,6 +157,8 @@ check options
     -ssh                test ssh
     -nfs                test nfs
     -archipelago        test archipelago
+
+other options
     -xdiff              graphical mode diff
     -nocache            use O_DIRECT on backing file
     -misalign           misalign memory allocations
