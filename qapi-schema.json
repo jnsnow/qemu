@@ -1520,6 +1520,24 @@
   'data': { } }
 
 ##
+# @ActionCancelMode
+#
+# An enumeration of Transactional cancellation modes.
+#
+# @none: Do not attempt to cancel any other Actions if any
+#        actions fail after the Transaction request succeeds.
+#        This is the default.
+#
+# @all:  If any action fails after the Transaction succeeds,
+#        cancel all actions. May be rejected by Actions that
+#        do not support this cancellation mode.
+#
+# Since: 2.5
+##
+{ 'enum': 'ActionCancelMode',
+  'data': [ 'none', 'all' ] }
+
+##
 # @TransactionAction
 #
 # A discriminated record of operations that can be performed with
@@ -1546,14 +1564,35 @@
    } }
 
 ##
+# @TransactionProperties
+#
+# Optional arguments to modify the behavior of a Transaction.
+#
+# @err-cancel: How failures that occur in jobs launched asynchronously
+#              by a Transaction that has already completed should be handled.
+#              See @ActionCancelMode for details.
+#
+# Since: 2.5
+##
+{ 'struct': 'TransactionProperties',
+  'data': {
+       '*err-cancel': 'ActionCancelMode'
+  }
+}
+
+##
 # @transaction
 #
 # Executes a number of transactionable QMP commands atomically. If any
 # operation fails, then the entire set of actions will be abandoned and the
 # appropriate error returned.
 #
-#  List of:
-#  @TransactionAction: information needed for the respective operation
+# @actions: List of @TransactionAction;
+#           information needed for the respective operations.
+#
+# @properties: Optional structure of additional options to control the
+#              execution of the transaction. See @TransactionProperties
+#              for additional detail.
 #
 # Returns: nothing on success
 #          Errors depend on the operations of the transaction
@@ -1565,7 +1604,10 @@
 # Since 1.1
 ##
 { 'command': 'transaction',
-  'data': { 'actions': [ 'TransactionAction' ] } }
+  'data': { 'actions': [ 'TransactionAction' ],
+            '*properties': 'TransactionProperties'
+          }
+}
 
 ##
 # @human-monitor-command:

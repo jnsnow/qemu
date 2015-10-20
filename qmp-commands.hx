@@ -1262,7 +1262,7 @@ EQMP
     },
     {
         .name       = "transaction",
-        .args_type  = "actions:q",
+        .args_type  = "actions:q,properties:q?",
         .mhandler.cmd_new = qmp_marshal_transaction,
     },
 

@@ -1033,7 +1033,7 @@ static void blockdev_do_action(int kind, void *data, Error **errp)
     action.data = data;
     list.value = &action;
     list.next = NULL;
-    qmp_transaction(&list, errp);
+    qmp_transaction(&list, false, NULL, errp);
 }
 
 void qmp_blockdev_snapshot_sync(bool has_device, const char *device,
@@ -1248,6 +1248,7 @@ typedef struct BlkActionOps {
  *
  * @action: QAPI-defined enum identifying which Action to perform.
  * @ops: Table of ActionOps this Action can perform.
+ * @block_job_txn: Transaction which this action belongs to.
  * @entry: List membership for all Actions in this Transaction.
  *
  * This structure must be arranged as first member in a subclassed type,
@@ -1257,6 +1258,8 @@ typedef struct BlkActionOps {
 struct BlkActionState {
     TransactionAction *action;
     const BlkActionOps *ops;
+    BlockJobTxn *block_job_txn;
+    TransactionProperties *txn_props;
     QSIMPLEQ_ENTRY(BlkActionState) entry;
 };
 
@@ -1267,6 +1270,20 @@ typedef struct InternalSnapshotState {
     AioContext *aio_context;
     QEMUSnapshotInfo sn;
 } InternalSnapshotState;
+
+
+static int action_check_cancel_mode(BlkActionState *s, Error **errp)
+{
+    if (s->txn_props->err_cancel != ACTION_CANCEL_MODE_NONE) {
+        error_setg(errp,
+                   "Action '%s' does not support Transaction property "
+                   "err-cancel = %s",
+                   TransactionActionKind_lookup[s->action->kind],
+                   ActionCancelMode_lookup[s->txn_props->err_cancel]);
+        return -1;
+    }
+    return 0;
+}
 
 static void internal_snapshot_prepare(BlkActionState *common,
                                       Error **errp)
@@ -1293,6 +1310,10 @@ static void internal_snapshot_prepare(BlkActionState *common,
     name = internal->name;
 
     /* 2. check for validation */
+    if (action_check_cancel_mode(common, errp) < 0) {
+        return;
+    }
+
     blk = blk_by_name(device);
     if (!blk) {
         error_set(errp, ERROR_CLASS_DEVICE_NOT_FOUND,
@@ -1444,6 +1465,10 @@ static void external_snapshot_prepare(BlkActionState *common,
     }
 
     /* start processing */
+    if (action_check_cancel_mode(common, errp) < 0) {
+        return;
+    }
+
     state->old_bs = bdrv_lookup_bs(has_device ? device : NULL,
                                    has_node_name ? node_name : NULL,
                                    &local_err);
@@ -1600,7 +1625,7 @@ static void drive_backup_prepare(BlkActionState *common, Error **errp)
                     backup->has_bitmap, backup->bitmap,
                     backup->has_on_source_error, backup->on_source_error,
                     backup->has_on_target_error, backup->on_target_error,
-                    NULL, &local_err);
+                    common->block_job_txn, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         return;
@@ -1685,7 +1710,7 @@ static void blockdev_backup_prepare(BlkActionState *common, Error **errp)
                        backup->has_speed, backup->speed,
                        backup->has_on_source_error, backup->on_source_error,
                        backup->has_on_target_error, backup->on_target_error,
-                       NULL, &local_err);
+                       common->block_job_txn, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         return;
@@ -1732,6 +1757,10 @@ static void block_dirty_bitmap_add_prepare(BlkActionState *common,
     BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
                                              common, common);
 
+    if (action_check_cancel_mode(common, errp) < 0) {
+        return;
+    }
+
     action = common->action->block_dirty_bitmap_add;
     /* AIO context taken and released within qmp_block_dirty_bitmap_add */
     qmp_block_dirty_bitmap_add(action->node, action->name,
@@ -1766,6 +1795,10 @@ static void block_dirty_bitmap_clear_prepare(BlkActionState *common,
     BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
                                              common, common);
     BlockDirtyBitmap *action;
+
+    if (action_check_cancel_mode(common, errp) < 0) {
+        return;
+    }
 
     action = common->action->block_dirty_bitmap_clear;
     state->bitmap = block_dirty_bitmap_lookup(action->node,
@@ -1869,18 +1902,49 @@ static const BlkActionOps actions[] = {
     }
 };
 
+/**
+ * Allocate a TransactionProperties structure if necessary, and fill
+ * that structure with desired defaults if they are unset.
+ */
+static TransactionProperties *get_transaction_properties(
+    TransactionProperties *props)
+{
+    if (!props) {
+        props = g_new0(TransactionProperties, 1);
+    }
+
+    if (!props->has_err_cancel) {
+        props->has_err_cancel = true;
+        props->err_cancel = ACTION_CANCEL_MODE_NONE;
+    }
+
+    return props;
+}
+
 /*
  * 'Atomic' group operations.  The operations are performed as a set, and if
  * any fail then we roll back all operations in the group.
  */
-void qmp_transaction(TransactionActionList *dev_list, Error **errp)
+void qmp_transaction(TransactionActionList *dev_list,
+                     bool has_props,
+                     struct TransactionProperties *props,
+                     Error **errp)
 {
     TransactionActionList *dev_entry = dev_list;
+    BlockJobTxn *block_job_txn = NULL;
     BlkActionState *state, *next;
     Error *local_err = NULL;
 
     QSIMPLEQ_HEAD(snap_bdrv_states, BlkActionState) snap_bdrv_states;
     QSIMPLEQ_INIT(&snap_bdrv_states);
+
+    /* Does this transaction get canceled as a group on failure?
+     * If not, we don't really need to make a BlockJobTxn.
+     */
+    props = get_transaction_properties(props);
+    if (props->err_cancel != ACTION_CANCEL_MODE_NONE) {
+        block_job_txn = block_job_txn_new();
+    }
 
     /* drain all i/o before any operations */
     bdrv_drain_all();
@@ -1901,6 +1965,8 @@ void qmp_transaction(TransactionActionList *dev_list, Error **errp)
         state = g_malloc0(ops->instance_size);
         state->ops = ops;
         state->action = dev_info;
+        state->block_job_txn = block_job_txn;
+        state->txn_props = props;
         QSIMPLEQ_INSERT_TAIL(&snap_bdrv_states, state, entry);
 
         state->ops->prepare(state, &local_err);
@@ -1933,6 +1999,10 @@ exit:
         }
         g_free(state);
     }
+    if (!has_props) {
+        qapi_free_TransactionProperties(props);
+    }
+    block_job_txn_unref(block_job_txn);
 }
 
 
