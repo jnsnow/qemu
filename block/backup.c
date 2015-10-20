@@ -486,7 +486,7 @@ void backup_start(BlockDriverState *bs, BlockDriverState *target,
                   BlockdevOnError on_source_error,
                   BlockdevOnError on_target_error,
                   BlockCompletionFunc *cb, void *opaque,
-                  Error **errp)
+                  BlockJobTxn *txn, Error **errp)
 {
     int64_t len;
 
@@ -568,6 +568,7 @@ void backup_start(BlockDriverState *bs, BlockDriverState *target,
                        sync_bitmap : NULL;
     job->common.len = len;
     job->common.co = qemu_coroutine_create(backup_run);
+    block_job_txn_add_job(txn, &job->common);
     qemu_coroutine_enter(job->common.co, job);
     return;
 
