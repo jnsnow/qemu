@@ -59,6 +59,7 @@ void *block_job_create(const BlockJobDriver *driver, BlockDriverState *bs,
     job->cb            = cb;
     job->opaque        = opaque;
     job->busy          = true;
+    job->refcnt        = 1;
     bs->job = job;
 
     /* Only set speed when necessary to avoid NotSupported error */
@@ -67,7 +68,7 @@ void *block_job_create(const BlockJobDriver *driver, BlockDriverState *bs,
 
         block_job_set_speed(job, speed, &local_err);
         if (local_err) {
-            block_job_release(bs);
+            block_job_unref(job);
             error_propagate(errp, local_err);
             return NULL;
         }
@@ -75,15 +76,21 @@ void *block_job_create(const BlockJobDriver *driver, BlockDriverState *bs,
     return job;
 }
 
-void block_job_release(BlockDriverState *bs)
+void block_job_ref(BlockJob *job)
 {
-    BlockJob *job = bs->job;
+    ++job->refcnt;
+}
 
-    bs->job = NULL;
-    bdrv_op_unblock_all(bs, job->blocker);
-    error_free(job->blocker);
-    g_free(job->id);
-    g_free(job);
+void block_job_unref(BlockJob *job)
+{
+    if (--job->refcnt == 0) {
+        job->bs->job = NULL;
+        bdrv_op_unblock_all(job->bs, job->blocker);
+        bdrv_unref(job->bs);
+        error_free(job->blocker);
+        g_free(job->id);
+        g_free(job);
+    }
 }
 
 void block_job_completed(BlockJob *job, int ret)
@@ -92,7 +99,7 @@ void block_job_completed(BlockJob *job, int ret)
 
     assert(bs->job == job);
     job->cb(job->opaque, ret);
-    block_job_release(bs);
+    block_job_unref(job);
 }
 
 void block_job_set_speed(BlockJob *job, int64_t speed, Error **errp)
