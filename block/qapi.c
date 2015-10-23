@@ -245,13 +245,15 @@ void bdrv_query_image_info(BlockDriverState *bs,
         info->has_backing_filename = true;
         bdrv_get_full_backing_filename(bs, backing_filename2, PATH_MAX, &err);
         if (err) {
-            error_propagate(errp, err);
-            qapi_free_ImageInfo(info);
+            /* Couldn't reconstruct that backing filename,
+             * So we'll skip this field, but apply a Best Effort to the query */
             g_free(backing_filename2);
-            return;
+            backing_filename2 = NULL;
+            error_free(err);
         }
 
-        if (strcmp(backing_filename, backing_filename2) != 0) {
+        if (backing_filename2 &&
+            strcmp(backing_filename, backing_filename2) != 0) {
             info->full_backing_filename =
                         g_strdup(backing_filename2);
             info->has_full_backing_filename = true;
