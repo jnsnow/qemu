@@ -642,10 +642,11 @@ static int read_f(BlockBackend *blk, int argc, char **argv)
     int c, cnt;
     char *buf;
     int64_t offset;
-    int count;
+    int64_t count;
     /* Some compilers get confused and warn if this is not initialized.  */
     int total = 0;
-    int pattern = 0, pattern_offset = 0, pattern_count = 0;
+    int pattern = 0;
+    int64_t pattern_offset = 0, pattern_count = 0;
 
     while ((c = getopt(argc, argv, "bCl:pP:qs:v")) != -1) {
         switch (c) {
@@ -734,7 +735,7 @@ static int read_f(BlockBackend *blk, int argc, char **argv)
             return 0;
         }
         if (count & 0x1ff) {
-            printf("count %d is not sector aligned\n",
+            printf("count %"PRId64" is not sector aligned\n",
                    count);
             return 0;
         }
@@ -762,7 +763,7 @@ static int read_f(BlockBackend *blk, int argc, char **argv)
         memset(cmp_buf, pattern, pattern_count);
         if (memcmp(buf + pattern_offset, cmp_buf, pattern_count)) {
             printf("Pattern verification failed at offset %"
-                   PRId64 ", %d bytes\n",
+                   PRId64 ", %"PRId64" bytes\n",
                    offset + pattern_offset, pattern_count);
         }
         g_free(cmp_buf);
@@ -957,7 +958,7 @@ static int write_f(BlockBackend *blk, int argc, char **argv)
     int c, cnt;
     char *buf = NULL;
     int64_t offset;
-    int count;
+    int64_t count;
     /* Some compilers get confused and warn if this is not initialized.  */
     int total = 0;
     int pattern = 0xcd;
@@ -1029,7 +1030,7 @@ static int write_f(BlockBackend *blk, int argc, char **argv)
         }
 
         if (count & 0x1ff) {
-            printf("count %d is not sector aligned\n",
+            printf("count %"PRId64" is not sector aligned\n",
                    count);
             return 0;
         }
@@ -1777,8 +1778,7 @@ static int discard_f(BlockBackend *blk, int argc, char **argv)
     struct timeval t1, t2;
     int Cflag = 0, qflag = 0;
     int c, ret;
-    int64_t offset;
-    int count;
+    int64_t offset, count;
 
     while ((c = getopt(argc, argv, "Cq")) != -1) {
         switch (c) {
@@ -1833,11 +1833,10 @@ out:
 static int alloc_f(BlockBackend *blk, int argc, char **argv)
 {
     BlockDriverState *bs = blk_bs(blk);
-    int64_t offset, sector_num;
-    int nb_sectors, remaining;
+    int64_t offset, sector_num, nb_sectors, remaining;
     char s1[64];
-    int num, sum_alloc;
-    int ret;
+    int num, ret;
+    int64_t sum_alloc;
 
     offset = cvtnum(argv[1]);
     if (offset < 0) {
@@ -1881,7 +1880,7 @@ static int alloc_f(BlockBackend *blk, int argc, char **argv)
 
     cvtstr(offset, s1, sizeof(s1));
 
-    printf("%d/%d sectors allocated at offset %s\n",
+    printf("%"PRId64"/%"PRId64" sectors allocated at offset %s\n",
            sum_alloc, nb_sectors, s1);
     return 0;
 }
@@ -2191,9 +2190,13 @@ static const cmdinfo_t sigraise_cmd = {
 
 static int sigraise_f(BlockBackend *blk, int argc, char **argv)
 {
-    int sig = cvtnum(argv[1]);
+    int64_t sig = cvtnum(argv[1]);
     if (sig < 0) {
         printf("non-numeric signal number argument -- %s\n", argv[1]);
+        return 0;
+    } else if (sig > NSIG) {
+        printf("signal argument '%s' is too large to be a valid signal\n",
+               argv[1]);
         return 0;
     }
 
