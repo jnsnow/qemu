@@ -107,6 +107,11 @@ compile_object() {
   do_cc $QEMU_CFLAGS $local_cflags -c -o $TMPO $TMPC
 }
 
+compile_cxx_object() {
+  local_cflags="$1"
+  do_cxx $QEMU_CXXFLAGS $local_cflags -c -o $TMPO $TMPC
+}
+
 compile_prog() {
   local_cflags="$1"
   local_ldflags="$2"
@@ -4436,13 +4441,31 @@ if ! compile_object "-Werror"; then
 fi
 
 ##########################################
+# Test that we can use FORTIFY_SOURCE,
+# which might break Clang.
+
+if test "$debug" = "no"; then
+  cat > $TMPC << EOF
+#include <cstdio>
+int main(int argc, char*argv[]) {
+  fprintf(stdout, "Hello World\n");
+  return 0;
+}
+EOF
+
+  if ! compile_cxx_object "-O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2"; then
+      fortify_source="no";
+  fi
+fi
+
+##########################################
 # End of CC checks
 # After here, no more $cc or $ld runs
 
 if test "$gcov" = "yes" ; then
   CFLAGS="-fprofile-arcs -ftest-coverage -g $CFLAGS"
   LDFLAGS="-fprofile-arcs -ftest-coverage $LDFLAGS"
-elif test "$debug" = "no" ; then
+elif test "$debug" = "no" && test "$fortify_source" != "no" ; then
   CFLAGS="-O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=2 $CFLAGS"
 fi
 
