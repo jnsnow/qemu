@@ -1337,44 +1337,58 @@ static BdrvDirtyBitmap *block_dirty_bitmap_lookup(const char *node,
 
 /* New and old BlockDriverState structs for atomic group operations */
 
-typedef struct BlkTransactionState BlkTransactionState;
+typedef struct BlkActionState BlkActionState;
 
-/* Only prepare() may fail. In a single transaction, only one of commit() or
-   abort() will be called, clean() will always be called if it present. */
-typedef struct BdrvActionOps {
-    /* Size of state struct, in bytes. */
-    size_t instance_size;
-    /* Prepare the work, must NOT be NULL. */
-    void (*prepare)(BlkTransactionState *common, Error **errp);
-    /* Commit the changes, can be NULL. */
-    void (*commit)(BlkTransactionState *common);
-    /* Abort the changes on fail, can be NULL. */
-    void (*abort)(BlkTransactionState *common);
-    /* Clean up resource in the end, can be NULL. */
-    void (*clean)(BlkTransactionState *common);
-} BdrvActionOps;
-
-/*
- * This structure must be arranged as first member in child type, assuming
- * that compiler will also arrange it to the same address with parent instance.
- * Later it will be used in free().
+/**
+ * BlkActionOps:
+ * Table of operations that define an Action.
+ *
+ * @instance_size: Size of state struct, in bytes.
+ * @prepare: Prepare the work, must NOT be NULL.
+ * @commit: Commit the changes, can be NULL.
+ * @abort: Abort the changes on fail, can be NULL.
+ * @clean: Clean up resources after all transaction actions have called
+ *         commit() or abort(). Can be NULL.
+ *
+ * Only prepare() may fail. In a single transaction, only one of commit() or
+ * abort() will be called. clean() will always be called if it is present.
  */
-struct BlkTransactionState {
+typedef struct BlkActionOps {
+    size_t instance_size;
+    void (*prepare)(BlkActionState *common, Error **errp);
+    void (*commit)(BlkActionState *common);
+    void (*abort)(BlkActionState *common);
+    void (*clean)(BlkActionState *common);
+} BlkActionOps;
+
+/**
+ * BlkActionState:
+ * Describes one Action's state within a Transaction.
+ *
+ * @action: QAPI-defined enum identifying which Action to perform.
+ * @ops: Table of ActionOps this Action can perform.
+ * @entry: List membership for all Actions in this Transaction.
+ *
+ * This structure must be arranged as first member in a subclassed type,
+ * assuming that the compiler will also arrange it to the same offsets as the
+ * base class.
+ */
+struct BlkActionState {
     TransactionAction *action;
-    const BdrvActionOps *ops;
-    QSIMPLEQ_ENTRY(BlkTransactionState) entry;
+    const BlkActionOps *ops;
+    QSIMPLEQ_ENTRY(BlkActionState) entry;
 };
 
 /* internal snapshot private data */
 typedef struct InternalSnapshotState {
-    BlkTransactionState common;
+    BlkActionState common;
     BlockDriverState *bs;
     AioContext *aio_context;
     QEMUSnapshotInfo sn;
     bool created;
 } InternalSnapshotState;
 
-static void internal_snapshot_prepare(BlkTransactionState *common,
+static void internal_snapshot_prepare(BlkActionState *common,
                                       Error **errp)
 {
     Error *local_err = NULL;
@@ -1473,7 +1487,7 @@ static void internal_snapshot_prepare(BlkTransactionState *common,
     state->created = true;
 }
 
-static void internal_snapshot_abort(BlkTransactionState *common)
+static void internal_snapshot_abort(BlkActionState *common)
 {
     InternalSnapshotState *state =
                              DO_UPCAST(InternalSnapshotState, common, common);
@@ -1496,7 +1510,7 @@ static void internal_snapshot_abort(BlkTransactionState *common)
     }
 }
 
-static void internal_snapshot_clean(BlkTransactionState *common)
+static void internal_snapshot_clean(BlkActionState *common)
 {
     InternalSnapshotState *state = DO_UPCAST(InternalSnapshotState,
                                              common, common);
@@ -1511,13 +1525,13 @@ static void internal_snapshot_clean(BlkTransactionState *common)
 
 /* external snapshot private data */
 typedef struct ExternalSnapshotState {
-    BlkTransactionState common;
+    BlkActionState common;
     BlockDriverState *old_bs;
     BlockDriverState *new_bs;
     AioContext *aio_context;
 } ExternalSnapshotState;
 
-static void external_snapshot_prepare(BlkTransactionState *common,
+static void external_snapshot_prepare(BlkActionState *common,
                                       Error **errp)
 {
     int flags, ret;
@@ -1633,7 +1647,7 @@ static void external_snapshot_prepare(BlkTransactionState *common,
     }
 }
 
-static void external_snapshot_commit(BlkTransactionState *common)
+static void external_snapshot_commit(BlkActionState *common)
 {
     ExternalSnapshotState *state =
                              DO_UPCAST(ExternalSnapshotState, common, common);
@@ -1649,7 +1663,7 @@ static void external_snapshot_commit(BlkTransactionState *common)
                 NULL);
 }
 
-static void external_snapshot_abort(BlkTransactionState *common)
+static void external_snapshot_abort(BlkActionState *common)
 {
     ExternalSnapshotState *state =
                              DO_UPCAST(ExternalSnapshotState, common, common);
@@ -1658,7 +1672,7 @@ static void external_snapshot_abort(BlkTransactionState *common)
     }
 }
 
-static void external_snapshot_clean(BlkTransactionState *common)
+static void external_snapshot_clean(BlkActionState *common)
 {
     ExternalSnapshotState *state =
                              DO_UPCAST(ExternalSnapshotState, common, common);
@@ -1669,13 +1683,13 @@ static void external_snapshot_clean(BlkTransactionState *common)
 }
 
 typedef struct DriveBackupState {
-    BlkTransactionState common;
+    BlkActionState common;
     BlockDriverState *bs;
     AioContext *aio_context;
     BlockJob *job;
 } DriveBackupState;
 
-static void drive_backup_prepare(BlkTransactionState *common, Error **errp)
+static void drive_backup_prepare(BlkActionState *common, Error **errp)
 {
     DriveBackupState *state = DO_UPCAST(DriveBackupState, common, common);
     BlockBackend *blk;
@@ -1720,7 +1734,7 @@ static void drive_backup_prepare(BlkTransactionState *common, Error **errp)
     state->job = state->bs->job;
 }
 
-static void drive_backup_abort(BlkTransactionState *common)
+static void drive_backup_abort(BlkActionState *common)
 {
     DriveBackupState *state = DO_UPCAST(DriveBackupState, common, common);
     BlockDriverState *bs = state->bs;
@@ -1731,7 +1745,7 @@ static void drive_backup_abort(BlkTransactionState *common)
     }
 }
 
-static void drive_backup_clean(BlkTransactionState *common)
+static void drive_backup_clean(BlkActionState *common)
 {
     DriveBackupState *state = DO_UPCAST(DriveBackupState, common, common);
 
@@ -1742,13 +1756,13 @@ static void drive_backup_clean(BlkTransactionState *common)
 }
 
 typedef struct BlockdevBackupState {
-    BlkTransactionState common;
+    BlkActionState common;
     BlockDriverState *bs;
     BlockJob *job;
     AioContext *aio_context;
 } BlockdevBackupState;
 
-static void blockdev_backup_prepare(BlkTransactionState *common, Error **errp)
+static void blockdev_backup_prepare(BlkActionState *common, Error **errp)
 {
     BlockdevBackupState *state = DO_UPCAST(BlockdevBackupState, common, common);
     BlockdevBackup *backup;
@@ -1800,7 +1814,7 @@ static void blockdev_backup_prepare(BlkTransactionState *common, Error **errp)
     state->job = state->bs->job;
 }
 
-static void blockdev_backup_abort(BlkTransactionState *common)
+static void blockdev_backup_abort(BlkActionState *common)
 {
     BlockdevBackupState *state = DO_UPCAST(BlockdevBackupState, common, common);
     BlockDriverState *bs = state->bs;
@@ -1811,7 +1825,7 @@ static void blockdev_backup_abort(BlkTransactionState *common)
     }
 }
 
-static void blockdev_backup_clean(BlkTransactionState *common)
+static void blockdev_backup_clean(BlkActionState *common)
 {
     BlockdevBackupState *state = DO_UPCAST(BlockdevBackupState, common, common);
 
@@ -1822,7 +1836,7 @@ static void blockdev_backup_clean(BlkTransactionState *common)
 }
 
 typedef struct BlockDirtyBitmapState {
-    BlkTransactionState common;
+    BlkActionState common;
     BdrvDirtyBitmap *bitmap;
     BlockDriverState *bs;
     AioContext *aio_context;
@@ -1830,7 +1844,7 @@ typedef struct BlockDirtyBitmapState {
     bool prepared;
 } BlockDirtyBitmapState;
 
-static void block_dirty_bitmap_add_prepare(BlkTransactionState *common,
+static void block_dirty_bitmap_add_prepare(BlkActionState *common,
                                            Error **errp)
 {
     Error *local_err = NULL;
@@ -1838,7 +1852,7 @@ static void block_dirty_bitmap_add_prepare(BlkTransactionState *common,
     BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
                                              common, common);
 
-    action = common->action->block_dirty_bitmap_add;
+    action = common->action->u.block_dirty_bitmap_add;
     /* AIO context taken and released within qmp_block_dirty_bitmap_add */
     qmp_block_dirty_bitmap_add(action->node, action->name,
                                action->has_granularity, action->granularity,
@@ -1851,13 +1865,13 @@ static void block_dirty_bitmap_add_prepare(BlkTransactionState *common,
     }
 }
 
-static void block_dirty_bitmap_add_abort(BlkTransactionState *common)
+static void block_dirty_bitmap_add_abort(BlkActionState *common)
 {
     BlockDirtyBitmapAdd *action;
     BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
                                              common, common);
 
-    action = common->action->block_dirty_bitmap_add;
+    action = common->action->u.block_dirty_bitmap_add;
     /* Should not be able to fail: IF the bitmap was added via .prepare(),
      * then the node reference and bitmap name must have been valid.
      */
@@ -1866,14 +1880,14 @@ static void block_dirty_bitmap_add_abort(BlkTransactionState *common)
     }
 }
 
-static void block_dirty_bitmap_clear_prepare(BlkTransactionState *common,
+static void block_dirty_bitmap_clear_prepare(BlkActionState *common,
                                              Error **errp)
 {
     BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
                                              common, common);
     BlockDirtyBitmap *action;
 
-    action = common->action->block_dirty_bitmap_clear;
+    action = common->action->u.block_dirty_bitmap_clear;
     state->bitmap = block_dirty_bitmap_lookup(action->node,
                                               action->name,
                                               &state->bs,
@@ -1895,7 +1909,7 @@ static void block_dirty_bitmap_clear_prepare(BlkTransactionState *common,
     /* AioContext is released in .clean() */
 }
 
-static void block_dirty_bitmap_clear_abort(BlkTransactionState *common)
+static void block_dirty_bitmap_clear_abort(BlkActionState *common)
 {
     BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
                                              common, common);
@@ -1903,7 +1917,7 @@ static void block_dirty_bitmap_clear_abort(BlkTransactionState *common)
     bdrv_undo_clear_dirty_bitmap(state->bitmap, state->backup);
 }
 
-static void block_dirty_bitmap_clear_commit(BlkTransactionState *common)
+static void block_dirty_bitmap_clear_commit(BlkActionState *common)
 {
     BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
                                              common, common);
@@ -1911,7 +1925,7 @@ static void block_dirty_bitmap_clear_commit(BlkTransactionState *common)
     hbitmap_free(state->backup);
 }
 
-static void block_dirty_bitmap_clear_clean(BlkTransactionState *common)
+static void block_dirty_bitmap_clear_clean(BlkActionState *common)
 {
     BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
                                              common, common);
@@ -1921,17 +1935,17 @@ static void block_dirty_bitmap_clear_clean(BlkTransactionState *common)
     }
 }
 
-static void abort_prepare(BlkTransactionState *common, Error **errp)
+static void abort_prepare(BlkActionState *common, Error **errp)
 {
     error_setg(errp, "Transaction aborted using Abort action");
 }
 
-static void abort_commit(BlkTransactionState *common)
+static void abort_commit(BlkActionState *common)
 {
     g_assert_not_reached(); /* this action never succeeds */
 }
 
-static const BdrvActionOps actions[] = {
+static const BlkActionOps actions[] = {
     [TRANSACTION_ACTION_KIND_BLOCKDEV_SNAPSHOT_SYNC] = {
         .instance_size = sizeof(ExternalSnapshotState),
         .prepare  = external_snapshot_prepare,
@@ -1952,7 +1966,7 @@ static const BdrvActionOps actions[] = {
         .clean = blockdev_backup_clean,
     },
     [TRANSACTION_ACTION_KIND_ABORT] = {
-        .instance_size = sizeof(BlkTransactionState),
+        .instance_size = sizeof(BlkActionState),
         .prepare = abort_prepare,
         .commit = abort_commit,
     },
@@ -1983,10 +1997,10 @@ static const BdrvActionOps actions[] = {
 void qmp_transaction(TransactionActionList *dev_list, Error **errp)
 {
     TransactionActionList *dev_entry = dev_list;
-    BlkTransactionState *state, *next;
+    BlkActionState *state, *next;
     Error *local_err = NULL;
 
-    QSIMPLEQ_HEAD(snap_bdrv_states, BlkTransactionState) snap_bdrv_states;
+    QSIMPLEQ_HEAD(snap_bdrv_states, BlkActionState) snap_bdrv_states;
     QSIMPLEQ_INIT(&snap_bdrv_states);
 
     /* drain all i/o before any operations */
@@ -1995,7 +2009,7 @@ void qmp_transaction(TransactionActionList *dev_list, Error **errp)
     /* We don't do anything in this loop that commits us to the operations */
     while (NULL != dev_entry) {
         TransactionAction *dev_info = NULL;
-        const BdrvActionOps *ops;
+        const BlkActionOps *ops;
 
         dev_info = dev_entry->value;
         dev_entry = dev_entry->next;
