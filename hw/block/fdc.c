@@ -161,10 +161,12 @@ typedef struct FDrive {
     bool media_inserted;      /* Is there a medium in the tray */
 } FDrive;
 
+static FloppyDriveType get_default_drive_type(FDrive *drv);
+
 static void fd_init(FDrive *drv)
 {
     /* Drive */
-    drv->drive = FLOPPY_DRIVE_TYPE_NONE;
+    drv->drive = get_default_drive_type(drv);
     drv->perpendicular = 0;
     /* Disk */
     drv->disk = FLOPPY_DRIVE_TYPE_NONE;
@@ -277,7 +279,7 @@ static bool pick_geometry(FDrive *drv)
             break;
         }
         if (drv->drive == parse->drive ||
-            drv->drive == FLOPPY_DRIVE_TYPE_NONE) {
+            drv->drive == FLOPPY_DRIVE_TYPE_AUTO) {
             size = (parse->max_head + 1) * parse->max_track *
                 parse->last_sect;
             if (nb_sectors == size) {
@@ -291,13 +293,17 @@ static bool pick_geometry(FDrive *drv)
     }
     if (match == -1) {
         if (first_match == -1) {
-            match = 1;
+            /* No entry found: drive_type was NONE or we neglected to add any
+             * candidate geometries for our drive type into the fd_formats table
+             */
+            match = ARRAY_SIZE(fd_formats) - 1;
         } else {
             match = first_match;
         }
         parse = &fd_formats[match];
     }
 
+ out:
     if (parse->max_head == 0) {
         drv->flags &= ~FDISK_DBL_SIDES;
     } else {
@@ -319,8 +325,16 @@ static bool pick_geometry(FDrive *drv)
 
 static void pick_drive_type(FDrive *drv)
 {
-    if (pick_geometry(drv)) {
-        drv->drive = drv->disk;
+    if (drv->drive != FLOPPY_DRIVE_TYPE_AUTO) {
+        return;
+    }
+
+    if (!drv->media_inserted) {
+        drv->drive = FDRIVE_AUTO_FALLBACK;
+    } else {
+        if (pick_geometry(drv)) {
+            drv->drive = drv->disk;
+        }
     }
 }
 
@@ -622,6 +636,27 @@ typedef struct FDCtrlISABus {
     int32_t bootindexA;
     int32_t bootindexB;
 } FDCtrlISABus;
+
+static FloppyDriveType get_default_drive_type(FDrive *drv)
+{
+    FDCtrl *fdctrl = drv->fdctrl;
+
+    g_assert_cmpint(MAX_FD, ==, 2);
+
+    if (!drv->blk) {
+        return FLOPPY_DRIVE_TYPE_NONE;
+    }
+
+    if (drv == &fdctrl->drives[0]) {
+        return fdctrl->typeA;
+    }
+
+    if (drv == &fdctrl->drives[1]) {
+        return fdctrl->typeB;
+    }
+
+    return FDRIVE_DEFAULT;
+}
 
 static uint32_t fdctrl_read (void *opaque, uint32_t reg)
 {
