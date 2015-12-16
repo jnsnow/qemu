@@ -133,7 +133,8 @@ typedef struct FDrive {
     FDCtrl *fdctrl;
     BlockBackend *blk;
     /* Drive status */
-    FDriveType drive;
+    FDriveType drive;         /* CMOS drive type */
+    FDriveType disk;          /* Current disk type */
     uint8_t perpendicular;    /* 2.88 MB access mode    */
     /* Position */
     uint8_t head;
@@ -157,6 +158,7 @@ static void fd_init(FDrive *drv)
     drv->drive = FDRIVE_DRV_NONE;
     drv->perpendicular = 0;
     /* Disk */
+    drv->disk = FDRIVE_DRV_NONE;
     drv->last_sect = 0;
     drv->max_track = 0;
 }
@@ -286,6 +288,7 @@ static void pick_geometry(FDrive *drv)
     drv->max_track = parse->max_track;
     drv->last_sect = parse->last_sect;
     drv->drive = parse->drive;
+    drv->disk = drv->media_inserted ? parse->drive : FDRIVE_DRV_NONE;
     drv->media_rate = parse->rate;
 
     if (drv->media_inserted) {
