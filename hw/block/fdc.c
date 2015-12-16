@@ -155,13 +155,11 @@ typedef struct FDrive {
     bool media_inserted;      /* Is there a medium in the tray */
 } FDrive;
 
-
 static FloppyDriveType get_fallback_drive_type(FDrive *drv);
 
 static void fd_init(FDrive *drv)
 {
     /* Drive */
-    drv->drive = FLOPPY_DRIVE_TYPE_NONE; /* FIXME: Obey CLI properties */
     drv->perpendicular = 0;
     /* Disk */
     drv->disk = FLOPPY_DRIVE_TYPE_NONE;
@@ -274,7 +272,7 @@ static bool pick_geometry(FDrive *drv)
             break;
         }
         if (drv->drive == parse->drive ||
-            drv->drive == FLOPPY_DRIVE_TYPE_NONE) {
+            drv->drive == FLOPPY_DRIVE_TYPE_AUTO) {
             size = (parse->max_head + 1) * parse->max_track *
                 parse->last_sect;
             if (nb_sectors == size) {
@@ -288,7 +286,10 @@ static bool pick_geometry(FDrive *drv)
     }
     if (match == -1) {
         if (first_match == -1) {
-            match = 1;
+            /* No entry found: drive_type was NONE or we neglected to add any
+             * candidate geometries for our drive type into the fd_formats table
+             */
+            match = ARRAY_SIZE(fd_formats) - 1;
         } else {
             match = first_match;
         }
@@ -316,9 +317,19 @@ static bool pick_geometry(FDrive *drv)
 
 static void pick_drive_type(FDrive *drv)
 {
-    if (pick_geometry(drv)) {
-        drv->drive = drv->disk;
+    if (drv->drive != FLOPPY_DRIVE_TYPE_AUTO) {
+        return;
     }
+
+    if (!drv->media_inserted) {
+        drv->drive = get_fallback_drive_type(drv);
+    } else {
+        if (pick_geometry(drv)) {
+            drv->drive = drv->disk;
+        }
+    }
+
+    g_assert(drv->drive != FLOPPY_DRIVE_TYPE_AUTO);
 }
 
 /* Revalidate a disk drive after a disk change */
