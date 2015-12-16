@@ -2,7 +2,11 @@
 #define HW_COMPAT_H
 
 #define HW_COMPAT_2_5 \
-    /* empty */
+        {\
+            .driver   = "fdc",\
+            .property = "fallback",\
+            .value    = "144",\
+        },
 
 #define HW_COMPAT_2_4 \
     {\
