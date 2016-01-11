@@ -638,9 +638,9 @@ typedef struct CommonBlockJobCBInfo {
     Error **errp;
 } CommonBlockJobCBInfo;
 
-static void common_block_job_cb(void *opaque, int ret)
+static void common_block_job_cb(BlockJob *job, int ret)
 {
-    CommonBlockJobCBInfo *cbi = opaque;
+    CommonBlockJobCBInfo *cbi = block_job_data(job);
 
     if (ret < 0) {
         error_setg_errno(cbi->errp, -ret, "Block job failed");

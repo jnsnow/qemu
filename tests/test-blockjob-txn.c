@@ -66,9 +66,9 @@ typedef struct {
     int *result;
 } TestBlockJobCBData;
 
-static void test_block_job_cb(void *opaque, int ret)
+static void test_block_job_cb(BlockJob *job, int ret)
 {
-    TestBlockJobCBData *data = opaque;
+    TestBlockJobCBData *data = block_job_data(job);
     if (!ret && block_job_is_cancelled(&data->job->common)) {
         ret = -ECANCELED;
     }

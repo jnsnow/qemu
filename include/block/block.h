@@ -16,6 +16,8 @@ typedef struct BdrvChild BdrvChild;
 typedef struct BdrvChildRole BdrvChildRole;
 typedef struct BlockJobTxn BlockJobTxn;
 
+typedef void BlockJobCompletionFunc(BlockJob *job, int ret);
+
 typedef struct BlockDriverInfo {
     /* in bytes, 0 if irrelevant */
     int cluster_size;

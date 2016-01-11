@@ -202,7 +202,7 @@ static const BlockJobDriver commit_job_driver = {
 
 void commit_start(BlockDriverState *bs, BlockDriverState *base,
                   BlockDriverState *top, int64_t speed,
-                  BlockdevOnError on_error, BlockCompletionFunc *cb,
+                  BlockdevOnError on_error, BlockJobCompletionFunc *cb,
                   void *opaque, const char *backing_file_str, Error **errp)
 {
     CommitBlockJob *s;
