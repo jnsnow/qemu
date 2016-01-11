@@ -213,7 +213,7 @@ static const BlockJobDriver stream_job_driver = {
     .set_speed     = stream_set_speed,
 };
 
-void stream_start(BlockDriverState *bs, BlockDriverState *base,
+BlockJob *stream_start(BlockDriverState *bs, BlockDriverState *base,
                   const char *backing_file_str, int64_t speed,
                   BlockdevOnError on_error,
                   BlockCompletionFunc *cb,
@@ -225,19 +225,21 @@ void stream_start(BlockDriverState *bs, BlockDriverState *base,
          on_error == BLOCKDEV_ON_ERROR_ENOSPC) &&
         (!bs->blk || !blk_iostatus_is_enabled(bs->blk))) {
         error_setg(errp, QERR_INVALID_PARAMETER, "on-error");
-        return;
+        return NULL;
     }
 
     s = block_job_create(&stream_job_driver, bs, speed, cb, opaque, errp);
     if (!s) {
-        return;
+        return NULL;
     }
 
     s->base = base;
     s->backing_file_str = g_strdup(backing_file_str);
 
     s->on_error = on_error;
+    block_job_ref(&s->common);
     s->common.co = qemu_coroutine_create(stream_run);
     trace_stream_start(bs, base, s, s->common.co, opaque);
     qemu_coroutine_enter(s->common.co, s);
+    return &s->common;
 }

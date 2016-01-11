@@ -2884,6 +2884,7 @@ void qmp_block_stream(const char *device,
     BlockBackend *blk;
     BlockDriverState *bs;
     BlockDriverState *base_bs = NULL;
+    BlockJob *job;
     AioContext *aio_context;
     Error *local_err = NULL;
     const char *base_name = NULL;
@@ -2933,14 +2934,15 @@ void qmp_block_stream(const char *device,
     /* backing_file string overrides base bs filename */
     base_name = has_backing_file ? backing_file : base_name;
 
-    stream_start(bs, base_bs, base_name, has_speed ? speed : 0,
-                 on_error, block_job_cb, bs, &local_err);
+    job = stream_start(bs, base_bs, base_name, has_speed ? speed : 0,
+                       on_error, block_job_cb, bs, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         goto out;
     }
 
-    trace_qmp_block_stream(bs, bs->job);
+    trace_qmp_block_stream(bs, job);
+    block_job_unref(job);
 
 out:
     aio_context_release(aio_context);
