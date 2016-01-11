@@ -683,7 +683,7 @@ void mirror_start(BlockDriverState *bs, BlockDriverState *target,
  * Start a backup operation on @bs.  Clusters in @bs are written to @target
  * until the job is cancelled or manually completed.
  */
-void backup_start(BlockDriverState *bs, BlockDriverState *target,
+BlockJob *backup_start(BlockDriverState *bs, BlockDriverState *target,
                   int64_t speed, MirrorSyncMode sync_mode,
                   BdrvDirtyBitmap *sync_bitmap,
                   BlockdevOnError on_source_error,

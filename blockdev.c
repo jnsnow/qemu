@@ -1806,17 +1806,17 @@ typedef struct DriveBackupState {
     BlockJob *job;
 } DriveBackupState;
 
-static void do_drive_backup(const char *device, const char *target,
-                            bool has_format, const char *format,
-                            enum MirrorSyncMode sync,
-                            bool has_mode, enum NewImageMode mode,
-                            bool has_speed, int64_t speed,
-                            bool has_bitmap, const char *bitmap,
-                            bool has_on_source_error,
-                            BlockdevOnError on_source_error,
-                            bool has_on_target_error,
-                            BlockdevOnError on_target_error,
-                            BlockJobTxn *txn, Error **errp);
+static BlockJob *do_drive_backup(const char *device, const char *target,
+                                 bool has_format, const char *format,
+                                 enum MirrorSyncMode sync,
+                                 bool has_mode, enum NewImageMode mode,
+                                 bool has_speed, int64_t speed,
+                                 bool has_bitmap, const char *bitmap,
+                                 bool has_on_source_error,
+                                 BlockdevOnError on_source_error,
+                                 bool has_on_target_error,
+                                 BlockdevOnError on_target_error,
+                                 BlockJobTxn *txn, Error **errp);
 
 static void drive_backup_prepare(BlkActionState *common, Error **errp)
 {
@@ -1846,31 +1846,29 @@ static void drive_backup_prepare(BlkActionState *common, Error **errp)
     bdrv_drained_begin(blk_bs(blk));
     state->bs = blk_bs(blk);
 
-    do_drive_backup(backup->device, backup->target,
-                    backup->has_format, backup->format,
-                    backup->sync,
-                    backup->has_mode, backup->mode,
-                    backup->has_speed, backup->speed,
-                    backup->has_bitmap, backup->bitmap,
-                    backup->has_on_source_error, backup->on_source_error,
-                    backup->has_on_target_error, backup->on_target_error,
-                    common->block_job_txn, &local_err);
+    state->job = do_drive_backup(backup->device, backup->target,
+                                 backup->has_format, backup->format,
+                                 backup->sync,
+                                 backup->has_mode, backup->mode,
+                                 backup->has_speed, backup->speed,
+                                 backup->has_bitmap, backup->bitmap,
+                                 backup->has_on_source_error,
+                                 backup->on_source_error,
+                                 backup->has_on_target_error,
+                                 backup->on_target_error,
+                                 common->block_job_txn, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         return;
     }
-
-    state->job = state->bs->job;
 }
 
 static void drive_backup_abort(BlkActionState *common)
 {
     DriveBackupState *state = DO_UPCAST(DriveBackupState, common, common);
-    BlockDriverState *bs = state->bs;
 
-    /* Only cancel if it's the job we started */
-    if (bs && bs->job && bs->job == state->job) {
-        block_job_cancel_sync(bs->job);
+    if (state->job) {
+        block_job_cancel_sync(state->job);
     }
 }
 
@@ -1882,6 +1880,11 @@ static void drive_backup_clean(BlkActionState *common)
         bdrv_drained_end(state->bs);
         aio_context_release(state->aio_context);
     }
+
+    if (state->job) {
+        block_job_unref(state->job);
+        state->job = NULL;
+    }
 }
 
 typedef struct BlockdevBackupState {
@@ -1891,14 +1894,14 @@ typedef struct BlockdevBackupState {
     AioContext *aio_context;
 } BlockdevBackupState;
 
-static void do_blockdev_backup(const char *device, const char *target,
-                               enum MirrorSyncMode sync,
-                               bool has_speed, int64_t speed,
-                               bool has_on_source_error,
-                               BlockdevOnError on_source_error,
-                               bool has_on_target_error,
-                               BlockdevOnError on_target_error,
-                               BlockJobTxn *txn, Error **errp);
+static BlockJob *do_blockdev_backup(const char *device, const char *target,
+                                    enum MirrorSyncMode sync,
+                                    bool has_speed, int64_t speed,
+                                    bool has_on_source_error,
+                                    BlockdevOnError on_source_error,
+                                    bool has_on_target_error,
+                                    BlockdevOnError on_target_error,
+                                    BlockJobTxn *txn, Error **errp);
 
 static void blockdev_backup_prepare(BlkActionState *common, Error **errp)
 {
@@ -1938,28 +1941,26 @@ static void blockdev_backup_prepare(BlkActionState *common, Error **errp)
     state->bs = blk_bs(blk);
     bdrv_drained_begin(state->bs);
 
-    do_blockdev_backup(backup->device, backup->target,
-                       backup->sync,
-                       backup->has_speed, backup->speed,
-                       backup->has_on_source_error, backup->on_source_error,
-                       backup->has_on_target_error, backup->on_target_error,
-                       common->block_job_txn, &local_err);
+    state->job = do_blockdev_backup(backup->device, backup->target,
+                                    backup->sync,
+                                    backup->has_speed, backup->speed,
+                                    backup->has_on_source_error,
+                                    backup->on_source_error,
+                                    backup->has_on_target_error,
+                                    backup->on_target_error,
+                                    common->block_job_txn, &local_err);
     if (local_err) {
         error_propagate(errp, local_err);
         return;
     }
-
-    state->job = state->bs->job;
 }
 
 static void blockdev_backup_abort(BlkActionState *common)
 {
     BlockdevBackupState *state = DO_UPCAST(BlockdevBackupState, common, common);
-    BlockDriverState *bs = state->bs;
 
-    /* Only cancel if it's the job we started */
-    if (bs && bs->job && bs->job == state->job) {
-        block_job_cancel_sync(bs->job);
+    if (state->job) {
+        block_job_cancel_sync(state->job);
     }
 }
 
@@ -1970,6 +1971,11 @@ static void blockdev_backup_clean(BlkActionState *common)
     if (state->aio_context) {
         bdrv_drained_end(state->bs);
         aio_context_release(state->aio_context);
+    }
+
+    if (state->job) {
+        block_job_unref(state->job);
+        state->job = NULL;
     }
 }
 
@@ -3058,22 +3064,23 @@ out:
     aio_context_release(aio_context);
 }
 
-static void do_drive_backup(const char *device, const char *target,
-                            bool has_format, const char *format,
-                            enum MirrorSyncMode sync,
-                            bool has_mode, enum NewImageMode mode,
-                            bool has_speed, int64_t speed,
-                            bool has_bitmap, const char *bitmap,
-                            bool has_on_source_error,
-                            BlockdevOnError on_source_error,
-                            bool has_on_target_error,
-                            BlockdevOnError on_target_error,
-                            BlockJobTxn *txn, Error **errp)
+static BlockJob *do_drive_backup(const char *device, const char *target,
+                                 bool has_format, const char *format,
+                                 enum MirrorSyncMode sync,
+                                 bool has_mode, enum NewImageMode mode,
+                                 bool has_speed, int64_t speed,
+                                 bool has_bitmap, const char *bitmap,
+                                 bool has_on_source_error,
+                                 BlockdevOnError on_source_error,
+                                 bool has_on_target_error,
+                                 BlockdevOnError on_target_error,
+                                 BlockJobTxn *txn, Error **errp)
 {
     BlockBackend *blk;
     BlockDriverState *bs;
     BlockDriverState *target_bs;
     BlockDriverState *source = NULL;
+    BlockJob *job = NULL;
     BdrvDirtyBitmap *bmap = NULL;
     AioContext *aio_context;
     QDict *options = NULL;
@@ -3099,7 +3106,7 @@ static void do_drive_backup(const char *device, const char *target,
     if (!blk) {
         error_set(errp, ERROR_CLASS_DEVICE_NOT_FOUND,
                   "Device '%s' not found", device);
-        return;
+        return NULL;
     }
 
     aio_context = blk_get_aio_context(blk);
@@ -3182,9 +3189,9 @@ static void do_drive_backup(const char *device, const char *target,
         }
     }
 
-    backup_start(bs, target_bs, speed, sync, bmap,
-                 on_source_error, on_target_error,
-                 block_job_cb, bs, txn, &local_err);
+    job = backup_start(bs, target_bs, speed, sync, bmap,
+                       on_source_error, on_target_error,
+                       block_job_cb, bs, txn, &local_err);
     if (local_err != NULL) {
         bdrv_unref(target_bs);
         error_propagate(errp, local_err);
@@ -3193,6 +3200,7 @@ static void do_drive_backup(const char *device, const char *target,
 
 out:
     aio_context_release(aio_context);
+    return job;
 }
 
 void qmp_drive_backup(const char *device, const char *target,
@@ -3205,12 +3213,15 @@ void qmp_drive_backup(const char *device, const char *target,
                       bool has_on_target_error, BlockdevOnError on_target_error,
                       Error **errp)
 {
-    return do_drive_backup(device, target, has_format, format, sync,
-                           has_mode, mode, has_speed, speed,
-                           has_bitmap, bitmap,
-                           has_on_source_error, on_source_error,
-                           has_on_target_error, on_target_error,
-                           NULL, errp);
+    BlockJob *job = do_drive_backup(device, target, has_format, format, sync,
+                                    has_mode, mode, has_speed, speed,
+                                    has_bitmap, bitmap,
+                                    has_on_source_error, on_source_error,
+                                    has_on_target_error, on_target_error,
+                                    NULL, errp);
+    if (job) {
+        block_job_unref(job);
+    }
 }
 
 BlockDeviceInfoList *qmp_query_named_block_nodes(Error **errp)
@@ -3218,18 +3229,19 @@ BlockDeviceInfoList *qmp_query_named_block_nodes(Error **errp)
     return bdrv_named_nodes_list(errp);
 }
 
-void do_blockdev_backup(const char *device, const char *target,
-                         enum MirrorSyncMode sync,
-                         bool has_speed, int64_t speed,
-                         bool has_on_source_error,
-                         BlockdevOnError on_source_error,
-                         bool has_on_target_error,
-                         BlockdevOnError on_target_error,
-                         BlockJobTxn *txn, Error **errp)
+BlockJob *do_blockdev_backup(const char *device, const char *target,
+                             enum MirrorSyncMode sync,
+                             bool has_speed, int64_t speed,
+                             bool has_on_source_error,
+                             BlockdevOnError on_source_error,
+                             bool has_on_target_error,
+                             BlockdevOnError on_target_error,
+                             BlockJobTxn *txn, Error **errp)
 {
     BlockBackend *blk, *target_blk;
     BlockDriverState *bs;
     BlockDriverState *target_bs;
+    BlockJob *job = NULL;
     Error *local_err = NULL;
     AioContext *aio_context;
 
@@ -3246,7 +3258,7 @@ void do_blockdev_backup(const char *device, const char *target,
     blk = blk_by_name(device);
     if (!blk) {
         error_setg(errp, "Device '%s' not found", device);
-        return;
+        return NULL;
     }
 
     aio_context = blk_get_aio_context(blk);
@@ -3272,14 +3284,15 @@ void do_blockdev_backup(const char *device, const char *target,
 
     bdrv_ref(target_bs);
     bdrv_set_aio_context(target_bs, aio_context);
-    backup_start(bs, target_bs, speed, sync, NULL, on_source_error,
-                 on_target_error, block_job_cb, bs, txn, &local_err);
+    job = backup_start(bs, target_bs, speed, sync, NULL, on_source_error,
+                       on_target_error, block_job_cb, bs, txn, &local_err);
     if (local_err != NULL) {
         bdrv_unref(target_bs);
         error_propagate(errp, local_err);
     }
 out:
     aio_context_release(aio_context);
+    return job;
 }
 
 void qmp_blockdev_backup(const char *device, const char *target,
@@ -3291,10 +3304,13 @@ void qmp_blockdev_backup(const char *device, const char *target,
                          BlockdevOnError on_target_error,
                          Error **errp)
 {
-    do_blockdev_backup(device, target, sync, has_speed, speed,
-                       has_on_source_error, on_source_error,
-                       has_on_target_error, on_target_error,
-                       NULL, errp);
+    BlockJob *job = do_blockdev_backup(device, target, sync, has_speed, speed,
+                                       has_on_source_error, on_source_error,
+                                       has_on_target_error, on_target_error,
+                                       NULL, errp);
+    if (job) {
+        block_job_unref(job);
+    }
 }
 
 /* Parameter check and block job starting for drive mirroring.
