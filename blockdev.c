@@ -2956,6 +2956,7 @@ void qmp_block_commit(const char *device,
     BlockBackend *blk;
     BlockDriverState *bs;
     BlockDriverState *base_bs, *top_bs;
+    BlockJob *job = NULL;
     AioContext *aio_context;
     Error *local_err = NULL;
     /* This will be part of the QMP command, if/when the
@@ -3037,8 +3038,8 @@ void qmp_block_commit(const char *device,
                              " but 'top' is the active layer");
             goto out;
         }
-        commit_active_start(bs, base_bs, speed, on_error, block_job_cb,
-                            bs, &local_err);
+        job = commit_active_start(bs, base_bs, speed, on_error, block_job_cb,
+                                  bs, &local_err);
     } else {
         commit_start(bs, base_bs, top_bs, speed, on_error, block_job_cb, bs,
                      has_backing_file ? backing_file : NULL, &local_err);
@@ -3049,6 +3050,9 @@ void qmp_block_commit(const char *device,
     }
 
 out:
+    if (job) {
+        block_job_unref(job);
+    }
     aio_context_release(aio_context);
 }
 

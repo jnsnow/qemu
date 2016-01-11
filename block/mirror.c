@@ -706,17 +706,18 @@ static const BlockJobDriver commit_active_job_driver = {
     .complete      = mirror_complete,
 };
 
-static void mirror_start_job(BlockDriverState *bs, BlockDriverState *target,
-                             const char *replaces,
-                             int64_t speed, uint32_t granularity,
-                             int64_t buf_size,
-                             BlockdevOnError on_source_error,
-                             BlockdevOnError on_target_error,
-                             bool unmap,
-                             BlockCompletionFunc *cb,
-                             void *opaque, Error **errp,
-                             const BlockJobDriver *driver,
-                             bool is_none_mode, BlockDriverState *base)
+static BlockJob *mirror_start_job(BlockDriverState *bs,
+                                  BlockDriverState *target,
+                                  const char *replaces,
+                                  int64_t speed, uint32_t granularity,
+                                  int64_t buf_size,
+                                  BlockdevOnError on_source_error,
+                                  BlockdevOnError on_target_error,
+                                  bool unmap,
+                                  BlockCompletionFunc *cb,
+                                  void *opaque, Error **errp,
+                                  const BlockJobDriver *driver,
+                                  bool is_none_mode, BlockDriverState *base)
 {
     MirrorBlockJob *s;
     BlockDriverState *replaced_bs;
@@ -731,12 +732,12 @@ static void mirror_start_job(BlockDriverState *bs, BlockDriverState *target,
          on_source_error == BLOCKDEV_ON_ERROR_ENOSPC) &&
         (!bs->blk || !blk_iostatus_is_enabled(bs->blk))) {
         error_setg(errp, QERR_INVALID_PARAMETER, "on-source-error");
-        return;
+        return NULL;
     }
 
     if (buf_size < 0) {
         error_setg(errp, "Invalid parameter 'buf-size'");
-        return;
+        return NULL;
     }
 
     if (buf_size == 0) {
@@ -748,19 +749,19 @@ static void mirror_start_job(BlockDriverState *bs, BlockDriverState *target,
     if (replaces) {
         replaced_bs = bdrv_lookup_bs(replaces, replaces, errp);
         if (replaced_bs == NULL) {
-            return;
+            return NULL;
         }
     } else {
         replaced_bs = bs;
     }
     if (replaced_bs->blk && target->blk) {
         error_setg(errp, "Can't create node with two BlockBackends");
-        return;
+        return NULL;
     }
 
     s = block_job_create(driver, bs, speed, cb, opaque, errp);
     if (!s) {
-        return;
+        return NULL;
     }
 
     s->replaces = g_strdup(replaces);
@@ -777,7 +778,7 @@ static void mirror_start_job(BlockDriverState *bs, BlockDriverState *target,
     if (!s->dirty_bitmap) {
         g_free(s->replaces);
         block_job_unref(&s->common);
-        return;
+        return NULL;
     }
 
     bdrv_op_block_all(s->target, s->common.blocker);
@@ -787,9 +788,11 @@ static void mirror_start_job(BlockDriverState *bs, BlockDriverState *target,
         blk_set_on_error(s->target->blk, on_target_error, on_target_error);
         blk_iostatus_enable(s->target->blk);
     }
+    block_job_ref(&s->common);
     s->common.co = qemu_coroutine_create(mirror_run);
     trace_mirror_start(bs, s, s->common.co, opaque);
     qemu_coroutine_enter(s->common.co, s);
+    return &s->common;
 }
 
 void mirror_start(BlockDriverState *bs, BlockDriverState *target,
@@ -803,6 +806,7 @@ void mirror_start(BlockDriverState *bs, BlockDriverState *target,
 {
     bool is_none_mode;
     BlockDriverState *base;
+    BlockJob *job;
 
     if (mode == MIRROR_SYNC_MODE_INCREMENTAL) {
         error_setg(errp, "Sync mode 'incremental' not supported");
@@ -810,27 +814,31 @@ void mirror_start(BlockDriverState *bs, BlockDriverState *target,
     }
     is_none_mode = mode == MIRROR_SYNC_MODE_NONE;
     base = mode == MIRROR_SYNC_MODE_TOP ? backing_bs(bs) : NULL;
-    mirror_start_job(bs, target, replaces,
-                     speed, granularity, buf_size,
-                     on_source_error, on_target_error, unmap, cb, opaque, errp,
-                     &mirror_job_driver, is_none_mode, base);
+    job = mirror_start_job(bs, target, replaces,
+                           speed, granularity, buf_size,
+                           on_source_error, on_target_error, unmap, cb, opaque,
+                           errp, &mirror_job_driver, is_none_mode, base);
+    if (job) {
+        block_job_unref(job);
+    }
 }
 
-void commit_active_start(BlockDriverState *bs, BlockDriverState *base,
-                         int64_t speed,
-                         BlockdevOnError on_error,
-                         BlockCompletionFunc *cb,
-                         void *opaque, Error **errp)
+BlockJob *commit_active_start(BlockDriverState *bs, BlockDriverState *base,
+                              int64_t speed,
+                              BlockdevOnError on_error,
+                              BlockCompletionFunc *cb,
+                              void *opaque, Error **errp)
 {
     int64_t length, base_length;
     int orig_base_flags;
     int ret;
     Error *local_err = NULL;
+    BlockJob *job;
 
     orig_base_flags = bdrv_get_flags(base);
 
     if (bdrv_reopen(base, bs->open_flags, errp)) {
-        return;
+        return NULL;
     }
 
     length = bdrv_getlength(bs);
@@ -859,19 +867,19 @@ void commit_active_start(BlockDriverState *bs, BlockDriverState *base,
     }
 
     bdrv_ref(base);
-    mirror_start_job(bs, base, NULL, speed, 0, 0,
-                     on_error, on_error, false, cb, opaque, &local_err,
-                     &commit_active_job_driver, false, base);
+    job = mirror_start_job(bs, base, NULL, speed, 0, 0,
+                           on_error, on_error, false, cb, opaque, &local_err,
+                           &commit_active_job_driver, false, base);
     if (local_err) {
         error_propagate(errp, local_err);
         goto error_restore_flags;
     }
 
-    return;
+    return job;
 
 error_restore_flags:
     /* ignore error and errp for bdrv_reopen, because we want to propagate
      * the original error */
     bdrv_reopen(base, orig_base_flags, NULL);
-    return;
+    return NULL;
 }

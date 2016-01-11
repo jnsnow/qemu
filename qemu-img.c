@@ -647,8 +647,9 @@ static void common_block_job_cb(void *opaque, int ret)
     }
 }
 
-static void run_block_job(BlockJob *job, Error **errp)
+static void run_block_job(BlockJob **pjob, Error **errp)
 {
+    BlockJob *job = *pjob;
     AioContext *aio_context = bdrv_get_aio_context(job->bs);
 
     do {
@@ -662,6 +663,8 @@ static void run_block_job(BlockJob *job, Error **errp)
     /* A block job may finish instantaneously without publishing any progress,
      * so just signal completion here */
     qemu_progress_print(100.f, 0);
+    block_job_unref(job);
+    *pjob = NULL;
 }
 
 static int img_commit(int argc, char **argv)
@@ -670,6 +673,7 @@ static int img_commit(int argc, char **argv)
     const char *filename, *fmt, *cache, *base;
     BlockBackend *blk;
     BlockDriverState *bs, *base_bs;
+    BlockJob *job;
     bool progress = false, quiet = false, drop = false;
     Error *local_err = NULL;
     CommonBlockJobCBInfo cbi;
@@ -758,8 +762,8 @@ static int img_commit(int argc, char **argv)
         .bs   = bs,
     };
 
-    commit_active_start(bs, base_bs, 0, BLOCKDEV_ON_ERROR_REPORT,
-                        common_block_job_cb, &cbi, &local_err);
+    job = commit_active_start(bs, base_bs, 0, BLOCKDEV_ON_ERROR_REPORT,
+                              common_block_job_cb, &cbi, &local_err);
     if (local_err) {
         goto done;
     }
@@ -772,7 +776,7 @@ static int img_commit(int argc, char **argv)
         bdrv_ref(bs);
     }
 
-    run_block_job(bs->job, &local_err);
+    run_block_job(&job, &local_err);
     if (local_err) {
         goto unref_backing;
     }

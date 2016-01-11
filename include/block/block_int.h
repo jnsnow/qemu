@@ -630,11 +630,11 @@ void commit_start(BlockDriverState *bs, BlockDriverState *base,
  * @errp: Error object.
  *
  */
-void commit_active_start(BlockDriverState *bs, BlockDriverState *base,
-                         int64_t speed,
-                         BlockdevOnError on_error,
-                         BlockCompletionFunc *cb,
-                         void *opaque, Error **errp);
+BlockJob *commit_active_start(BlockDriverState *bs, BlockDriverState *base,
+                              int64_t speed,
+                              BlockdevOnError on_error,
+                              BlockCompletionFunc *cb,
+                              void *opaque, Error **errp);
 /*
  * mirror_start:
  * @bs: Block device to operate on.
