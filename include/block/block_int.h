@@ -598,10 +598,11 @@ int is_windows_drive(const char *filename);
  * streaming job, the backing file of @bs will be changed to
  * @base_id in the written image and to @base in the live BlockDriverState.
  */
-void stream_start(BlockDriverState *bs, BlockDriverState *base,
-                  const char *base_id, int64_t speed, BlockdevOnError on_error,
-                  BlockCompletionFunc *cb,
-                  void *opaque, Error **errp);
+BlockJob *stream_start(BlockDriverState *bs, BlockDriverState *base,
+                       const char *base_id, int64_t speed,
+                       BlockdevOnError on_error,
+                       BlockCompletionFunc *cb,
+                       void *opaque, Error **errp);
 
 /**
  * commit_start:
