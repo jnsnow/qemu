@@ -492,7 +492,7 @@ BlockJob *backup_start(BlockDriverState *bs, BlockDriverState *target,
                        BdrvDirtyBitmap *sync_bitmap,
                        BlockdevOnError on_source_error,
                        BlockdevOnError on_target_error,
-                       BlockCompletionFunc *cb, void *opaque,
+                       BlockJobCompletionFunc *cb, void *opaque,
                        BlockJobTxn *txn, Error **errp)
 {
     int64_t len;

@@ -601,7 +601,7 @@ int is_windows_drive(const char *filename);
 BlockJob *stream_start(BlockDriverState *bs, BlockDriverState *base,
                        const char *base_id, int64_t speed,
                        BlockdevOnError on_error,
-                       BlockCompletionFunc *cb,
+                       BlockJobCompletionFunc *cb,
                        void *opaque, Error **errp);
 
 /**
@@ -619,7 +619,7 @@ BlockJob *stream_start(BlockDriverState *bs, BlockDriverState *base,
  */
 void commit_start(BlockDriverState *bs, BlockDriverState *base,
                  BlockDriverState *top, int64_t speed,
-                 BlockdevOnError on_error, BlockCompletionFunc *cb,
+                 BlockdevOnError on_error, BlockJobCompletionFunc *cb,
                  void *opaque, const char *backing_file_str, Error **errp);
 /**
  * commit_active_start:
@@ -635,7 +635,7 @@ void commit_start(BlockDriverState *bs, BlockDriverState *base,
 BlockJob *commit_active_start(BlockDriverState *bs, BlockDriverState *base,
                               int64_t speed,
                               BlockdevOnError on_error,
-                              BlockCompletionFunc *cb,
+                              BlockJobCompletionFunc *cb,
                               void *opaque, Error **errp);
 /*
  * mirror_start:
@@ -665,7 +665,7 @@ void mirror_start(BlockDriverState *bs, BlockDriverState *target,
                   MirrorSyncMode mode, BlockdevOnError on_source_error,
                   BlockdevOnError on_target_error,
                   bool unmap,
-                  BlockCompletionFunc *cb,
+                  BlockJobCompletionFunc *cb,
                   void *opaque, Error **errp);
 
 /*
@@ -689,7 +689,7 @@ BlockJob *backup_start(BlockDriverState *bs, BlockDriverState *target,
                   BdrvDirtyBitmap *sync_bitmap,
                   BlockdevOnError on_source_error,
                   BlockdevOnError on_target_error,
-                  BlockCompletionFunc *cb, void *opaque,
+                  BlockJobCompletionFunc *cb, void *opaque,
                   BlockJobTxn *txn, Error **errp);
 
 void blk_set_bs(BlockBackend *blk, BlockDriverState *bs);

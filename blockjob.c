@@ -51,7 +51,7 @@ struct BlockJobTxn {
 };
 
 void *block_job_create(const BlockJobDriver *driver, BlockDriverState *bs,
-                       int64_t speed, BlockCompletionFunc *cb,
+                       int64_t speed, BlockJobCompletionFunc *cb,
                        void *opaque, Error **errp)
 {
     BlockJob *job;
@@ -90,6 +90,15 @@ void *block_job_create(const BlockJobDriver *driver, BlockDriverState *bs,
     return job;
 }
 
+/**
+ * For generic callbacks to retrieve the data they submitted
+ * during callback registration.
+ */
+void *block_job_data(BlockJob *job)
+{
+    return job->opaque;
+}
+
 void block_job_ref(BlockJob *job)
 {
     ++job->refcnt;
@@ -118,7 +127,7 @@ static void block_job_completed_single(BlockJob *job)
             job->driver->abort(job);
         }
     }
-    job->cb(job->opaque, job->ret);
+    job->cb(job, job->ret);
     if (job->txn) {
         block_job_txn_unref(job->txn);
     }

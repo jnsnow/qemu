@@ -2854,28 +2854,24 @@ out:
     aio_context_release(aio_context);
 }
 
-static void block_job_cb(void *opaque, int ret)
+static void block_job_cb(BlockJob *job, int ret)
 {
     /* Note that this function may be executed from another AioContext besides
      * the QEMU main loop.  If you need to access anything that assumes the
      * QEMU global mutex, use a BH or introduce a mutex.
      */
-
-    BlockDriverState *bs = opaque;
     const char *msg = NULL;
 
-    trace_block_job_cb(bs, bs->job, ret);
-
-    assert(bs->job);
+    trace_block_job_cb(job->bs, job, ret);
 
     if (ret < 0) {
         msg = strerror(-ret);
     }
 
-    if (block_job_is_cancelled(bs->job)) {
-        block_job_event_cancelled(bs->job);
+    if (block_job_is_cancelled(job)) {
+        block_job_event_cancelled(job);
     } else {
-        block_job_event_completed(bs->job, msg);
+        block_job_event_completed(job, msg);
     }
 }
 

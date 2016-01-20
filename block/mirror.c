@@ -715,7 +715,7 @@ static BlockJob *mirror_start_job(BlockDriverState *bs,
                                   BlockdevOnError on_source_error,
                                   BlockdevOnError on_target_error,
                                   bool unmap,
-                                  BlockCompletionFunc *cb,
+                                  BlockJobCompletionFunc *cb,
                                   void *opaque, Error **errp,
                                   const BlockJobDriver *driver,
                                   bool is_none_mode, BlockDriverState *base)
@@ -802,7 +802,7 @@ void mirror_start(BlockDriverState *bs, BlockDriverState *target,
                   MirrorSyncMode mode, BlockdevOnError on_source_error,
                   BlockdevOnError on_target_error,
                   bool unmap,
-                  BlockCompletionFunc *cb,
+                  BlockJobCompletionFunc *cb,
                   void *opaque, Error **errp)
 {
     bool is_none_mode;
@@ -827,7 +827,7 @@ void mirror_start(BlockDriverState *bs, BlockDriverState *target,
 BlockJob *commit_active_start(BlockDriverState *bs, BlockDriverState *base,
                               int64_t speed,
                               BlockdevOnError on_error,
-                              BlockCompletionFunc *cb,
+                              BlockJobCompletionFunc *cb,
                               void *opaque, Error **errp)
 {
     int64_t length, base_length;
