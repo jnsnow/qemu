@@ -18,6 +18,7 @@
 #include "qemu/main-loop.h"
 #include "qemu/timer.h"
 #include "sysemu/block-backend.h"
+#include <math.h>
 
 #define CMD_NOFILE_OK   0x01
 
@@ -227,7 +228,13 @@ static struct timeval tsub(struct timeval t1, struct timeval t2)
 
 static double tdiv(double value, struct timeval tv)
 {
-    return value / ((double)tv.tv_sec + ((double)tv.tv_usec / 1000000.0));
+    double seconds = ((double)tv.tv_sec + ((double)tv.tv_usec / 1000000.0));
+
+    if (seconds == 0.0) {
+        return INFINITY;
+    }
+
+    return value / seconds;
 }
 
 #define HOURS(sec)      ((sec) / (60 * 60))
