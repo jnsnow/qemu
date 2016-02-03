@@ -2231,6 +2231,9 @@ static int get_block_status(BlockDriverState *bs, int64_t sector_num,
     if (file && e->has_offset) {
         e->has_filename = true;
         e->filename = file->filename;
+    } else {
+        e->has_filename = false;
+        e->filename = NULL;
     }
     return 0;
 }
@@ -2264,7 +2267,7 @@ static int img_map(int argc, char **argv)
     BlockDriverState *bs;
     const char *filename, *fmt, *output;
     int64_t length;
-    MapEntry curr = { .length = 0 }, next;
+    MapEntry curr = { .length = 0 }, next = { .length = 0 };
     int ret = 0;
 
     fmt = NULL;
