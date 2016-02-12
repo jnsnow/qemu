@@ -568,9 +568,16 @@ void backup_start(BlockDriverState *bs, BlockDriverState *target,
     job->on_target_error = on_target_error;
     job->target = target;
     job->sync_mode = sync_mode;
-    job->sync_bitmap = sync_mode == MIRROR_SYNC_MODE_INCREMENTAL ?
-                       sync_bitmap : NULL;
-    job->cluster_size = BACKUP_CLUSTER_SIZE_DEFAULT;
+    if (sync_mode == MIRROR_SYNC_MODE_INCREMENTAL) {
+        BlockDriverInfo bdi;
+
+        bdrv_get_info(job->target, &bdi);
+        job->sync_bitmap = sync_bitmap;
+        job->cluster_size = MAX(BACKUP_CLUSTER_SIZE_DEFAULT,
+                                bdi.cluster_size);
+    } else {
+        job->cluster_size = BACKUP_CLUSTER_SIZE_DEFAULT;
+    }
     job->sectors_per_cluster = job->cluster_size / BDRV_SECTOR_SIZE;
     job->common.len = len;
     job->common.co = qemu_coroutine_create(backup_run);
