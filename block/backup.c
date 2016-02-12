@@ -501,6 +501,7 @@ void backup_start(BlockDriverState *bs, BlockDriverState *target,
                   BlockJobTxn *txn, Error **errp)
 {
     int64_t len;
+    BlockDriverInfo bdi;
 
     assert(bs);
     assert(target);
@@ -578,7 +579,14 @@ void backup_start(BlockDriverState *bs, BlockDriverState *target,
     job->sync_mode = sync_mode;
     job->sync_bitmap = sync_mode == MIRROR_SYNC_MODE_INCREMENTAL ?
                        sync_bitmap : NULL;
-    job->cluster_size = BACKUP_CLUSTER_SIZE_DEFAULT;
+
+    /* If there is no backing file on the target, we cannot rely on COW if our
+     * backup cluster size is smaller than the target cluster size. Instead of
+     * checking for a backing file, we assume that just copying the data in the
+     * backup loop is comparable to the unreliable COW. */
+    bdrv_get_info(job->target, &bdi);
+    job->cluster_size = MAX(BACKUP_CLUSTER_SIZE_DEFAULT, bdi.cluster_size);
+
     job->common.len = len;
     job->common.co = qemu_coroutine_create(backup_run);
     block_job_txn_add_job(txn, &job->common);
