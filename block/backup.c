@@ -21,10 +21,7 @@
 #include "qemu/ratelimit.h"
 #include "sysemu/block-backend.h"
 
-#define BACKUP_CLUSTER_BITS 16
-#define BACKUP_CLUSTER_SIZE (1 << BACKUP_CLUSTER_BITS)
-#define BACKUP_SECTORS_PER_CLUSTER (BACKUP_CLUSTER_SIZE / BDRV_SECTOR_SIZE)
-
+#define BACKUP_CLUSTER_SIZE_DEFAULT (1 << 16)
 #define SLICE_TIME 100000000ULL /* ns */
 
 typedef struct CowRequest {
@@ -46,6 +43,8 @@ typedef struct BackupBlockJob {
     CoRwlock flush_rwlock;
     uint64_t sectors_read;
     HBitmap *bitmap;
+    int64_t cluster_size;
+    int64_t sectors_per_cluster;
     QLIST_HEAD(, CowRequest) inflight_reqs;
 } BackupBlockJob;
 
@@ -102,8 +101,8 @@ static int coroutine_fn backup_do_cow(BlockDriverState *bs,
 
     qemu_co_rwlock_rdlock(&job->flush_rwlock);
 
-    start = sector_num / BACKUP_SECTORS_PER_CLUSTER;
-    end = DIV_ROUND_UP(sector_num + nb_sectors, BACKUP_SECTORS_PER_CLUSTER);
+    start = sector_num / job->sectors_per_cluster;
+    end = DIV_ROUND_UP(sector_num + nb_sectors, job->sectors_per_cluster);
 
     trace_backup_do_cow_enter(job, start, sector_num, nb_sectors);
 
@@ -118,12 +117,12 @@ static int coroutine_fn backup_do_cow(BlockDriverState *bs,
 
         trace_backup_do_cow_process(job, start);
 
-        n = MIN(BACKUP_SECTORS_PER_CLUSTER,
+        n = MIN(job->sectors_per_cluster,
                 job->common.len / BDRV_SECTOR_SIZE -
-                start * BACKUP_SECTORS_PER_CLUSTER);
+                start * job->sectors_per_cluster);
 
         if (!bounce_buffer) {
-            bounce_buffer = qemu_blockalign(bs, BACKUP_CLUSTER_SIZE);
+            bounce_buffer = qemu_blockalign(bs, job->cluster_size);
         }
         iov.iov_base = bounce_buffer;
         iov.iov_len = n * BDRV_SECTOR_SIZE;
@@ -131,10 +130,10 @@ static int coroutine_fn backup_do_cow(BlockDriverState *bs,
 
         if (is_write_notifier) {
             ret = bdrv_co_readv_no_serialising(bs,
-                                           start * BACKUP_SECTORS_PER_CLUSTER,
+                                           start * job->sectors_per_cluster,
                                            n, &bounce_qiov);
         } else {
-            ret = bdrv_co_readv(bs, start * BACKUP_SECTORS_PER_CLUSTER, n,
+            ret = bdrv_co_readv(bs, start * job->sectors_per_cluster, n,
                                 &bounce_qiov);
         }
         if (ret < 0) {
@@ -147,11 +146,11 @@ static int coroutine_fn backup_do_cow(BlockDriverState *bs,
 
         if (buffer_is_zero(iov.iov_base, iov.iov_len)) {
             ret = bdrv_co_write_zeroes(job->target,
-                                       start * BACKUP_SECTORS_PER_CLUSTER,
+                                       start * job->sectors_per_cluster,
                                        n, BDRV_REQ_MAY_UNMAP);
         } else {
             ret = bdrv_co_writev(job->target,
-                                 start * BACKUP_SECTORS_PER_CLUSTER, n,
+                                 start * job->sectors_per_cluster, n,
                                  &bounce_qiov);
         }
         if (ret < 0) {
@@ -326,17 +325,17 @@ static int coroutine_fn backup_run_incremental(BackupBlockJob *job)
     HBitmapIter hbi;
 
     granularity = bdrv_dirty_bitmap_granularity(job->sync_bitmap);
-    clusters_per_iter = MAX((granularity / BACKUP_CLUSTER_SIZE), 1);
+    clusters_per_iter = MAX((granularity / job->cluster_size), 1);
     bdrv_dirty_iter_init(job->sync_bitmap, &hbi);
 
     /* Find the next dirty sector(s) */
     while ((sector = hbitmap_iter_next(&hbi)) != -1) {
-        cluster = sector / BACKUP_SECTORS_PER_CLUSTER;
+        cluster = sector / job->sectors_per_cluster;
 
         /* Fake progress updates for any clusters we skipped */
         if (cluster != last_cluster + 1) {
             job->common.offset += ((cluster - last_cluster - 1) *
-                                   BACKUP_CLUSTER_SIZE);
+                                   job->cluster_size);
         }
 
         for (end = cluster + clusters_per_iter; cluster < end; cluster++) {
@@ -344,8 +343,8 @@ static int coroutine_fn backup_run_incremental(BackupBlockJob *job)
                 if (yield_and_check(job)) {
                     return ret;
                 }
-                ret = backup_do_cow(bs, cluster * BACKUP_SECTORS_PER_CLUSTER,
-                                    BACKUP_SECTORS_PER_CLUSTER, &error_is_read,
+                ret = backup_do_cow(bs, cluster * job->sectors_per_cluster,
+                                    job->sectors_per_cluster, &error_is_read,
                                     false);
                 if ((ret < 0) &&
                     backup_error_action(job, error_is_read, -ret) ==
@@ -357,17 +356,17 @@ static int coroutine_fn backup_run_incremental(BackupBlockJob *job)
 
         /* If the bitmap granularity is smaller than the backup granularity,
          * we need to advance the iterator pointer to the next cluster. */
-        if (granularity < BACKUP_CLUSTER_SIZE) {
-            bdrv_set_dirty_iter(&hbi, cluster * BACKUP_SECTORS_PER_CLUSTER);
+        if (granularity < job->cluster_size) {
+            bdrv_set_dirty_iter(&hbi, cluster * job->sectors_per_cluster);
         }
 
         last_cluster = cluster - 1;
     }
 
     /* Play some final catchup with the progress meter */
-    end = DIV_ROUND_UP(job->common.len, BACKUP_CLUSTER_SIZE);
+    end = DIV_ROUND_UP(job->common.len, job->cluster_size);
     if (last_cluster + 1 < end) {
-        job->common.offset += ((end - last_cluster - 1) * BACKUP_CLUSTER_SIZE);
+        job->common.offset += ((end - last_cluster - 1) * job->cluster_size);
     }
 
     return ret;
@@ -390,7 +389,7 @@ static void coroutine_fn backup_run(void *opaque)
     qemu_co_rwlock_init(&job->flush_rwlock);
 
     start = 0;
-    end = DIV_ROUND_UP(job->common.len, BACKUP_CLUSTER_SIZE);
+    end = DIV_ROUND_UP(job->common.len, job->cluster_size);
 
     job->bitmap = hbitmap_alloc(end, 0);
 
@@ -427,7 +426,7 @@ static void coroutine_fn backup_run(void *opaque)
                 /* Check to see if these blocks are already in the
                  * backing file. */
 
-                for (i = 0; i < BACKUP_SECTORS_PER_CLUSTER;) {
+                for (i = 0; i < job->sectors_per_cluster;) {
                     /* bdrv_is_allocated() only returns true/false based
                      * on the first set of sectors it comes across that
                      * are are all in the same state.
@@ -436,8 +435,8 @@ static void coroutine_fn backup_run(void *opaque)
                      * needed but at some point that is always the case. */
                     alloced =
                         bdrv_is_allocated(bs,
-                                start * BACKUP_SECTORS_PER_CLUSTER + i,
-                                BACKUP_SECTORS_PER_CLUSTER - i, &n);
+                                start * job->sectors_per_cluster + i,
+                                job->sectors_per_cluster - i, &n);
                     i += n;
 
                     if (alloced == 1 || n == 0) {
@@ -452,8 +451,8 @@ static void coroutine_fn backup_run(void *opaque)
                 }
             }
             /* FULL sync mode we copy the whole drive. */
-            ret = backup_do_cow(bs, start * BACKUP_SECTORS_PER_CLUSTER,
-                    BACKUP_SECTORS_PER_CLUSTER, &error_is_read, false);
+            ret = backup_do_cow(bs, start * job->sectors_per_cluster,
+                    job->sectors_per_cluster, &error_is_read, false);
             if (ret < 0) {
                 /* Depending on error action, fail now or retry cluster */
                 BlockErrorAction action =
@@ -571,6 +570,8 @@ void backup_start(BlockDriverState *bs, BlockDriverState *target,
     job->sync_mode = sync_mode;
     job->sync_bitmap = sync_mode == MIRROR_SYNC_MODE_INCREMENTAL ?
                        sync_bitmap : NULL;
+    job->cluster_size = BACKUP_CLUSTER_SIZE_DEFAULT;
+    job->sectors_per_cluster = job->cluster_size / BDRV_SECTOR_SIZE;
     job->common.len = len;
     job->common.co = qemu_coroutine_create(backup_run);
     block_job_txn_add_job(txn, &job->common);
