@@ -175,6 +175,15 @@ BlockJob *block_job_get(const char *id);
 void block_job_set_speed(BlockJob *job, int64_t speed, Error **errp);
 
 /**
+ * block_job_start:
+ * @job: A job that has not yet been started.
+ *
+ * Begins execution of a block job.
+ * Takes ownership of one reference to the job object.
+ */
+void block_job_start(BlockJob *job);
+
+/**
  * block_job_cancel:
  * @job: The job to be canceled.
  *
