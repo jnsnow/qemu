@@ -62,6 +62,18 @@ static const TypeInfo ide_bus_info = {
     .class_init = ide_bus_class_init,
 };
 
+static const TypeInfo ata_bus_info = {
+    .name = TYPE_ATA_BUS,
+    .parent = TYPE_IDE_BUS,
+    .instance_size = sizeof(ATABus),
+};
+
+static const TypeInfo sata_bus_info = {
+    .name = TYPE_SATA_BUS,
+    .parent = TYPE_IDE_BUS,
+    .instance_size = sizeof(SATABus),
+};
+
 void ide_bus_new(IDEBus *idebus, size_t idebus_size, DeviceState *dev,
                  int bus_id, int max_units)
 {
@@ -387,6 +399,8 @@ static const TypeInfo ide_device_type_info = {
 static void ide_register_types(void)
 {
     type_register_static(&ide_bus_info);
+    type_register_static(&ata_bus_info);
+    type_register_static(&sata_bus_info);
     type_register_static(&ide_hd_info);
     type_register_static(&ide_cd_info);
     type_register_static(&ide_drive_info);

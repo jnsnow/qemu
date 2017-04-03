@@ -20,6 +20,8 @@
 #define USE_DMA_CDROM
 
 typedef struct IDEBus IDEBus;
+typedef struct ATABus ATABus;
+typedef struct SATABus SATABus;
 typedef struct IDEDevice IDEDevice;
 typedef struct IDEState IDEState;
 typedef struct IDEDMA IDEDMA;
@@ -27,6 +29,12 @@ typedef struct IDEDMAOps IDEDMAOps;
 
 #define TYPE_IDE_BUS "IDE"
 #define IDE_BUS(obj) OBJECT_CHECK(IDEBus, (obj), TYPE_IDE_BUS)
+
+#define TYPE_ATA_BUS "ATA"
+#define ATA_BUS(obj) OBJECT_CHECK(ATABus, (obj), TYPE_ATA_BUS)
+
+#define TYPE_SATA_BUS "SATA"
+#define SATA_BUS(obj) OBJECT_CHECK(SATABus, (obj), TYPE_SATA_BUS)
 
 /* Bits of HD_STATUS */
 #define ERR_STAT		0x01
@@ -485,6 +493,14 @@ struct IDEBus {
     VMChangeStateEntry *vmstate;
 };
 
+struct ATABus {
+    IDEBus parent;
+};
+
+struct SATABus {
+    IDEBus parent;
+};
+
 #define TYPE_IDE_DEVICE "ide-device"
 #define IDE_DEVICE(obj) \
      OBJECT_CHECK(IDEDevice, (obj), TYPE_IDE_DEVICE)
@@ -611,7 +627,7 @@ void ide_exit(IDEState *s);
 void ide_init_ioport(IDEBus *bus, ISADevice *isa, int iobase, int iobase2);
 void ide_register_restart_cb(IDEBus *bus);
 
-void ide_exec_cmd(IDEBus *bus, uint32_t val);
+void ide_exec_cmd(IDEState *s, uint32_t val);
 
 void ide_transfer_start(IDEState *s, uint8_t *buf, int size,
                         EndTransferFunc *end_transfer_func);

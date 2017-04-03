@@ -58,6 +58,7 @@ static const int smart_attributes[][12] = {
 };
 
 static void ide_dummy_transfer_stop(IDEState *s);
+static void bus_exec_cmd(IDEBus *bus, uint32_t val);
 
 static void padstr(char *str, const char *src, int len)
 {
@@ -1246,7 +1247,7 @@ void ide_ioport_write(void *opaque, uint32_t addr, uint32_t val)
     default:
     case 7:
         /* command */
-        ide_exec_cmd(bus, val);
+        bus_exec_cmd(bus, val);
         break;
     }
 }
@@ -2008,19 +2009,33 @@ static bool ide_cmd_permitted(IDEState *s, uint32_t cmd)
         && (ide_cmd_table[cmd].flags & (1u << s->drive_kind));
 }
 
-void ide_exec_cmd(IDEBus *bus, uint32_t val)
+static void bus_exec_cmd(IDEBus *bus, uint32_t val)
 {
     IDEState *s;
-    bool complete;
 
 #if defined(DEBUG_IDE)
-    printf("ide: CMD=%02x\n", val);
+    printf("idebus: CMD=%02x\n", val);
 #endif
+    
     s = idebus_active_if(bus);
     /* ignore commands to non existent slave */
     if (s != bus->ifs && !s->blk) {
         return;
     }
+
+    ide_exec_cmd(s, val);
+}
+
+
+void ide_exec_cmd(IDEState *s, uint32_t val)
+{
+    bool complete;
+
+    assert(s);
+
+#if defined(DEBUG_IDE)
+    printf("ide: CMD=%02x\n", val);
+#endif
 
     /* Only RESET is allowed while BSY and/or DRQ are set,
      * and only to ATAPI devices. */

@@ -55,6 +55,9 @@ static bool ahci_map_fis_address(AHCIDevice *ad);
 static void ahci_unmap_clb_address(AHCIDevice *ad);
 static void ahci_unmap_fis_address(AHCIDevice *ad);
 
+/* AHCI Device --> IDE Device */
+#define ATADEV(x) ((x).port.parent.ifs[0])
+#define ATADEV_P(p) (&((p)->port.parent.ifs[0]))
 
 static uint32_t  ahci_port_read(AHCIState *s, int port, int offset)
 {
@@ -91,7 +94,7 @@ static uint32_t  ahci_port_read(AHCIState *s, int port, int offset)
         val = pr->sig;
         break;
     case PORT_SCR_STAT:
-        if (s->dev[port].port.ifs[0].blk) {
+        if (ATADEV(s->dev[port]).blk) {
             val = SATA_SCR_SSTATUS_DET_DEV_PRESENT_PHY_UP |
                   SATA_SCR_SSTATUS_SPD_GEN1 | SATA_SCR_SSTATUS_IPM_ACTIVE;
         } else {
@@ -522,7 +525,7 @@ static void ahci_check_cmd_bh(void *opaque)
     ad->check_bh = NULL;
 
     if ((ad->busy_slot != -1) &&
-        !(ad->port.ifs[0].status & (BUSY_STAT|DRQ_STAT))) {
+        !(ATADEV_P(ad)->status & (BUSY_STAT|DRQ_STAT))) {
         /* no longer busy */
         ad->port_regs.cmd_issue &= ~(1 << ad->busy_slot);
         ad->busy_slot = -1;
@@ -533,7 +536,7 @@ static void ahci_check_cmd_bh(void *opaque)
 
 static void ahci_init_d2h(AHCIDevice *ad)
 {
-    IDEState *ide_state = &ad->port.ifs[0];
+    IDEState *ide_state = ATADEV_P(ad);
     AHCIPortRegs *pr = &ad->port_regs;
 
     if (ad->init_d2h_sent) {
@@ -553,7 +556,7 @@ static void ahci_init_d2h(AHCIDevice *ad)
 
 static void ahci_set_signature(AHCIDevice *ad, uint32_t sig)
 {
-    IDEState *s = &ad->port.ifs[0];
+    IDEState *s = ATADEV_P(ad);
     s->hcyl = sig >> 24 & 0xFF;
     s->lcyl = sig >> 16 & 0xFF;
     s->sector = sig >> 8 & 0xFF;
@@ -566,12 +569,12 @@ static void ahci_reset_port(AHCIState *s, int port)
 {
     AHCIDevice *d = &s->dev[port];
     AHCIPortRegs *pr = &d->port_regs;
-    IDEState *ide_state = &d->port.ifs[0];
+    IDEState *ide_state = ATADEV_P(d);
     int i;
 
     DPRINTF(port, "reset port\n");
 
-    ide_bus_reset(&d->port);
+    ide_bus_reset(&d->port.parent);
     ide_state->ncq_queues = AHCI_MAX_CMDS;
 
     pr->scr_stat = 0;
@@ -582,7 +585,7 @@ static void ahci_reset_port(AHCIState *s, int port)
     d->busy_slot = -1;
     d->init_d2h_sent = false;
 
-    ide_state = &s->dev[port].port.ifs[0];
+    ide_state = ATADEV_P(&s->dev[port]);
     if (!ide_state->blk) {
         return;
     }
@@ -704,7 +707,7 @@ static void ahci_write_fis_sdb(AHCIState *s, NCQTransferState *ncq_tfs)
     }
 
     sdb_fis = (SDBFIS *)&ad->res_fis[RES_FIS_SDBFIS];
-    ide_state = &ad->port.ifs[0];
+    ide_state = ATADEV_P(ad);
 
     sdb_fis->type = SATA_FIS_TYPE_SDB;
     /* Interrupt pending & Notification bit */
@@ -715,9 +718,8 @@ static void ahci_write_fis_sdb(AHCIState *s, NCQTransferState *ncq_tfs)
     sdb_fis->payload = cpu_to_le32(ad->finished);
 
     /* Update shadow registers (except BSY 0x80 and DRQ 0x08) */
-    pr->tfdata = (ad->port.ifs[0].error << 8) |
-        (ad->port.ifs[0].status & 0x77) |
-        (pr->tfdata & 0x88);
+    pr->tfdata = (ide_state->error << 8) | (ide_state->status & 0x77) |
+                 (pr->tfdata & 0x88);
     pr->scr_act &= ~ad->finished;
     ad->finished = 0;
 
@@ -731,7 +733,7 @@ static void ahci_write_fis_pio(AHCIDevice *ad, uint16_t len)
 {
     AHCIPortRegs *pr = &ad->port_regs;
     uint8_t *pio_fis;
-    IDEState *s = &ad->port.ifs[0];
+    IDEState *s = ATADEV_P(ad);
 
     if (!ad->res_fis || !(pr->cmd & PORT_CMD_FIS_RX)) {
         return;
@@ -762,8 +764,7 @@ static void ahci_write_fis_pio(AHCIDevice *ad, uint16_t len)
     pio_fis[19] = 0;
 
     /* Update shadow registers: */
-    pr->tfdata = (ad->port.ifs[0].error << 8) |
-        ad->port.ifs[0].status;
+    pr->tfdata = (s->error << 8) | s->status;
 
     if (pio_fis[2] & ERR_STAT) {
         ahci_trigger_irq(ad->hba, ad, PORT_IRQ_TF_ERR);
@@ -777,7 +778,7 @@ static bool ahci_write_fis_d2h(AHCIDevice *ad)
     AHCIPortRegs *pr = &ad->port_regs;
     uint8_t *d2h_fis;
     int i;
-    IDEState *s = &ad->port.ifs[0];
+    IDEState *s = ATADEV_P(ad);
 
     if (!ad->res_fis || !(pr->cmd & PORT_CMD_FIS_RX)) {
         return false;
@@ -805,8 +806,7 @@ static bool ahci_write_fis_d2h(AHCIDevice *ad)
     }
 
     /* Update shadow registers: */
-    pr->tfdata = (ad->port.ifs[0].error << 8) |
-        ad->port.ifs[0].status;
+    pr->tfdata = (s->error << 8) | s->status;
 
     if (d2h_fis[2] & ERR_STAT) {
         ahci_trigger_irq(ad->hba, ad, PORT_IRQ_TF_ERR);
@@ -851,8 +851,7 @@ static int ahci_populate_sglist(AHCIDevice *ad, QEMUSGList *sglist,
     int off_idx = -1;
     int64_t off_pos = -1;
     int tbl_entry_size;
-    IDEBus *bus = &ad->port;
-    BusState *qbus = BUS(bus);
+    BusState *qbus = BUS(&ad->port);
 
     if (!prdtl) {
         DPRINTF(ad->port_no, "no sg list given by guest: 0x%08x\n", opts);
@@ -914,7 +913,7 @@ out:
 
 static void ncq_err(NCQTransferState *ncq_tfs)
 {
-    IDEState *ide_state = &ncq_tfs->drive->port.ifs[0];
+    IDEState *ide_state = ATADEV_P(ncq_tfs->drive);
 
     ide_state->error = ABRT_ERR;
     ide_state->status = READY_STAT | ERR_STAT;
@@ -925,19 +924,20 @@ static void ncq_err(NCQTransferState *ncq_tfs)
 
 static void ncq_finish(NCQTransferState *ncq_tfs)
 {
+    AHCIDevice *ad = ncq_tfs->drive;
+
     /* If we didn't error out, set our finished bit. Errored commands
      * do not get a bit set for the SDB FIS ACT register, nor do they
      * clear the outstanding bit in scr_act (PxSACT). */
-    if (!(ncq_tfs->drive->port_regs.scr_err & (1 << ncq_tfs->tag))) {
-        ncq_tfs->drive->finished |= (1 << ncq_tfs->tag);
+    if (!(ad->port_regs.scr_err & (1 << ncq_tfs->tag))) {
+        ad->finished |= (1 << ncq_tfs->tag);
     }
 
-    ahci_write_fis_sdb(ncq_tfs->drive->hba, ncq_tfs);
+    ahci_write_fis_sdb(ad->hba, ncq_tfs);
 
-    DPRINTF(ncq_tfs->drive->port_no, "NCQ transfer tag %d finished\n",
-            ncq_tfs->tag);
+    DPRINTF(ad->port_no, "NCQ transfer tag %d finished\n", ncq_tfs->tag);
 
-    block_acct_done(blk_get_stats(ncq_tfs->drive->port.ifs[0].blk),
+    block_acct_done(blk_get_stats(ATADEV_P(ad)->blk),
                     &ncq_tfs->acct);
     qemu_sglist_destroy(&ncq_tfs->sglist);
     ncq_tfs->used = 0;
@@ -946,7 +946,7 @@ static void ncq_finish(NCQTransferState *ncq_tfs)
 static void ncq_cb(void *opaque, int ret)
 {
     NCQTransferState *ncq_tfs = (NCQTransferState *)opaque;
-    IDEState *ide_state = &ncq_tfs->drive->port.ifs[0];
+    IDEState *ide_state = ATADEV_P(ncq_tfs->drive);
 
     ncq_tfs->aiocb = NULL;
     if (ret == -ECANCELED) {
@@ -991,7 +991,7 @@ static int is_ncq(uint8_t ata_cmd)
 static void execute_ncq_command(NCQTransferState *ncq_tfs)
 {
     AHCIDevice *ad = ncq_tfs->drive;
-    IDEState *ide_state = &ad->port.ifs[0];
+    IDEState *ide_state = ATADEV_P(ad);
     int port = ad->port_no;
 
     g_assert(is_ncq(ncq_tfs->cmd));
@@ -1038,7 +1038,7 @@ static void process_ncq_command(AHCIState *s, int port, uint8_t *cmd_fis,
                                 uint8_t slot)
 {
     AHCIDevice *ad = &s->dev[port];
-    IDEState *ide_state = &ad->port.ifs[0];
+    IDEState *ide_state = ATADEV_P(ad);
     NCQFrame *ncq_fis = (NCQFrame*)cmd_fis;
     uint8_t tag = ncq_fis->tag >> 3;
     NCQTransferState *ncq_tfs = &ad->ncq_tfs[tag];
@@ -1124,7 +1124,7 @@ static AHCICmdHdr *get_cmd_header(AHCIState *s, uint8_t port, uint8_t slot)
 static void handle_reg_h2d_fis(AHCIState *s, int port,
                                uint8_t slot, uint8_t *cmd_fis)
 {
-    IDEState *ide_state = &s->dev[port].port.ifs[0];
+    IDEState *ide_state = ATADEV_P(&s->dev[port]);
     AHCICmdHdr *cmd = get_cmd_header(s, port, slot);
     uint16_t opts = le16_to_cpu(cmd->opts);
 
@@ -1203,7 +1203,7 @@ static void handle_reg_h2d_fis(AHCIState *s, int port,
     cmd->status = 0;
 
     /* We're ready to process the command in FIS byte 2. */
-    ide_exec_cmd(&s->dev[port].port, cmd_fis[2]);
+    ide_exec_cmd(ide_state, cmd_fis[2]);
 }
 
 static int handle_cmd(AHCIState *s, int port, uint8_t slot)
@@ -1214,7 +1214,14 @@ static int handle_cmd(AHCIState *s, int port, uint8_t slot)
     uint8_t *cmd_fis;
     dma_addr_t cmd_len;
 
-    if (s->dev[port].port.ifs[0].status & (BUSY_STAT|DRQ_STAT)) {
+    /* The device we are working for */
+    ide_state = ATADEV_P(&s->dev[port]);
+    if (!ide_state->blk) {
+        DPRINTF(port, "error: guest accessed unused port");
+        return -1;
+    }
+
+    if (ide_state->status & (BUSY_STAT|DRQ_STAT)) {
         /* Engine currently busy, try again later */
         DPRINTF(port, "engine busy\n");
         return -1;
@@ -1227,13 +1234,6 @@ static int handle_cmd(AHCIState *s, int port, uint8_t slot)
     cmd = get_cmd_header(s, port, slot);
     /* remember current slot handle for later */
     s->dev[port].cur_cmd = cmd;
-
-    /* The device we are working for */
-    ide_state = &s->dev[port].port.ifs[0];
-    if (!ide_state->blk) {
-        DPRINTF(port, "error: guest accessed unused port");
-        return -1;
-    }
 
     tbl_addr = le64_to_cpu(cmd->tbl_addr);
     cmd_len = 0x80;
@@ -1266,7 +1266,7 @@ out:
     dma_memory_unmap(s->as, cmd_fis, cmd_len, DMA_DIRECTION_FROM_DEVICE,
                      cmd_len);
 
-    if (s->dev[port].port.ifs[0].status & (BUSY_STAT|DRQ_STAT)) {
+    if (ide_state->status & (BUSY_STAT|DRQ_STAT)) {
         /* async command, complete later */
         s->dev[port].busy_slot = slot;
         return -1;
@@ -1280,7 +1280,7 @@ out:
 static void ahci_start_transfer(IDEDMA *dma)
 {
     AHCIDevice *ad = DO_UPCAST(AHCIDevice, dma, dma);
-    IDEState *s = &ad->port.ifs[0];
+    IDEState *s = ATADEV_P(ad);
     uint32_t size = (uint32_t)(s->data_end - s->data_ptr);
     /* write == ram -> device */
     uint16_t opts = le16_to_cpu(ad->cur_cmd->opts);
@@ -1364,7 +1364,7 @@ static void ahci_restart(IDEDMA *dma)
 static int32_t ahci_dma_prepare_buf(IDEDMA *dma, int32_t limit)
 {
     AHCIDevice *ad = DO_UPCAST(AHCIDevice, dma, dma);
-    IDEState *s = &ad->port.ifs[0];
+    IDEState *s = ATADEV_P(ad);
 
     if (ahci_populate_sglist(ad, &s->sg, ad->cur_cmd,
                              limit, s->io_buffer_offset) == -1) {
@@ -1393,7 +1393,7 @@ static void ahci_commit_buf(IDEDMA *dma, uint32_t tx_bytes)
 static int ahci_dma_rw_buf(IDEDMA *dma, int is_write)
 {
     AHCIDevice *ad = DO_UPCAST(AHCIDevice, dma, dma);
-    IDEState *s = &ad->port.ifs[0];
+    IDEState *s = ATADEV_P(ad);
     uint8_t *p = s->io_buffer + s->io_buffer_index;
     int l = s->io_buffer_size - s->io_buffer_index;
 
@@ -1471,14 +1471,14 @@ void ahci_realize(AHCIState *s, DeviceState *qdev, AddressSpace *as, int ports)
     for (i = 0; i < s->ports; i++) {
         AHCIDevice *ad = &s->dev[i];
 
-        ide_bus_new(&ad->port, sizeof(ad->port), qdev, i, 1);
-        ide_init2(&ad->port, irqs[i]);
+        ide_bus_new(&ad->port.parent, sizeof(ad->port), qdev, i, 1);
+        ide_init2(&ad->port.parent, irqs[i]);
 
         ad->hba = s;
         ad->port_no = i;
-        ad->port.dma = &ad->dma;
-        ad->port.dma->ops = &ahci_dma_ops;
-        ide_register_restart_cb(&ad->port);
+        ad->port.parent.dma = &ad->dma;
+        ad->port.parent.dma->ops = &ahci_dma_ops;
+        ide_register_restart_cb(&ad->port.parent);
     }
     g_free(irqs);
 }
@@ -1491,8 +1491,8 @@ void ahci_uninit(AHCIState *s)
         AHCIDevice *ad = &s->dev[i];
 
         for (j = 0; j < 2; j++) {
-            IDEState *s = &ad->port.ifs[j];
-
+            /* FIXME: We should not be touching ifs[1] */
+            IDEState *s = &ad->port.parent.ifs[j];
             ide_exit(s);
         }
     }
@@ -1545,8 +1545,8 @@ static const VMStateDescription vmstate_ahci_device = {
     .name = "ahci port",
     .version_id = 1,
     .fields = (VMStateField[]) {
-        VMSTATE_IDE_BUS(port, AHCIDevice),
-        VMSTATE_IDE_DRIVE(port.ifs[0], AHCIDevice),
+        VMSTATE_IDE_BUS(port.parent, AHCIDevice),
+        VMSTATE_IDE_DRIVE(port.parent.ifs[0], AHCIDevice),
         VMSTATE_UINT32(port_state, AHCIDevice),
         VMSTATE_UINT32(finished, AHCIDevice),
         VMSTATE_UINT32(port_regs.lst_addr, AHCIDevice),
@@ -1843,7 +1843,7 @@ void ahci_ide_create_devs(PCIDevice *dev, DriveInfo **hd)
         if (hd[i] == NULL) {
             continue;
         }
-        ide_create_drive(&ahci->dev[i].port, 0, hd[i]);
+        ide_create_drive(&ahci->dev[i].port.parent, 0, hd[i]);
     }
 
 }

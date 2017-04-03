@@ -270,7 +270,7 @@ typedef struct NCQTransferState {
 
 struct AHCIDevice {
     IDEDMA dma;
-    IDEBus port;
+    SATABus port;
     int port_no;
     uint32_t port_state;
     uint32_t finished;
