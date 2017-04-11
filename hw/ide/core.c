@@ -650,6 +650,25 @@ void ide_cancel_dma_sync(IDEState *s)
 {
     IDEBufferedRequest *req;
 
+    fprintf(stderr, "\n== ide_cancel_dma_sync ==\n\n");
+    fprintf(stderr, "ATA Registers:\n");
+    fprintf(stderr, "%s\t0x%02x\n", "cmd", s->cmd);
+    fprintf(stderr, "%s\t0x%02x\n", "feature", s->feature);
+    fprintf(stderr, "%s\t0x%02x\n", "error", s->error);
+    fprintf(stderr, "%s\t0x%08x\n", "nsector", s->nsector);
+    fprintf(stderr, "%s\t0x%02x\n", "sector", s->sector);
+    fprintf(stderr, "%s\t0x%02x\n", "lcyl", s->lcyl);
+    fprintf(stderr, "%s\t0x%02x\n", "hcyl", s->hcyl);
+    fprintf(stderr, "%s\t0x%02x\n", "hob_feature", s->hob_feature);
+    fprintf(stderr, "%s\t0x%02x\n", "hob_nsector", s->hob_nsector);
+    fprintf(stderr, "%s\t0x%02x\n", "hob_sector", s->hob_sector);
+    fprintf(stderr, "%s\t0x%02x\n", "hob_lcyl", s->hob_lcyl);
+    fprintf(stderr, "%s\t0x%02x\n", "hob_hcyl", s->hob_hcyl);
+    fprintf(stderr, "%s\t0x%02x\n", "select", s->select);
+    fprintf(stderr, "%s\t0x%02x\n", "status", s->status);
+    fprintf(stderr, "%s\t0x%08x\n", "lba48", s->lba48);
+    fflush(stderr);
+
     /* First invoke the callbacks of all buffered requests
      * and flag those requests as orphaned. Ideally there
      * are no unbuffered (Scatter Gather DMA Requests or
@@ -2036,6 +2055,7 @@ void ide_exec_cmd(IDEBus *bus, uint32_t val)
         return;
     }
 
+    s->cmd = val;
     s->status = READY_STAT | BUSY_STAT;
     s->error = 0;
     s->io_buffer_offset = 0;
