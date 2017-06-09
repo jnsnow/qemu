@@ -55,6 +55,8 @@ struct Coroutine {
     AioContext *ctx;
     QSIMPLEQ_ENTRY(Coroutine) co_queue_next;
     QSLIST_ENTRY(Coroutine) co_scheduled_next;
+
+    QEMUTimer *sleep_qt;
 };
 
 Coroutine *qemu_coroutine_new(void);

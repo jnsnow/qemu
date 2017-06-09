@@ -12,7 +12,7 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu/coroutine.h"
+#include "qemu/coroutine_int.h"
 #include "qemu/timer.h"
 #include "block/aio.h"
 
@@ -23,20 +23,17 @@ typedef struct CoSleepCB {
 
 static void co_sleep_cb(void *opaque)
 {
-    CoSleepCB *sleep_cb = opaque;
-
-    aio_co_wake(sleep_cb->co);
+    Coroutine *co = opaque;
+    aio_co_wake(co);
 }
 
 void coroutine_fn co_aio_sleep_ns(AioContext *ctx, QEMUClockType type,
                                   int64_t ns)
 {
-    CoSleepCB sleep_cb = {
-        .co = qemu_coroutine_self(),
-    };
-    sleep_cb.ts = aio_timer_new(ctx, type, SCALE_NS, co_sleep_cb, &sleep_cb);
-    timer_mod(sleep_cb.ts, qemu_clock_get_ns(type) + ns);
+    Coroutine *co = qemu_coroutine_self();
+    co->sleep_qt = aio_timer_new(ctx, type, SCALE_NS, co_sleep_cb, co);
+    timer_mod(co->sleep_qt, qemu_clock_get_ns(type) + ns);
     qemu_coroutine_yield();
-    timer_del(sleep_cb.ts);
-    timer_free(sleep_cb.ts);
+    timer_del(co->sleep_qt);
+    timer_free(co->sleep_qt);
 }
