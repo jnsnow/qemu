@@ -25,6 +25,8 @@ static void co_sleep_cb(void *opaque)
 {
     Coroutine *co = opaque;
     aio_co_wake(co);
+    timer_del(co->sleep_qt);
+    timer_free(co->sleep_qt);
 }
 
 void coroutine_fn co_aio_sleep_ns(AioContext *ctx, QEMUClockType type,
@@ -34,6 +36,4 @@ void coroutine_fn co_aio_sleep_ns(AioContext *ctx, QEMUClockType type,
     co->sleep_qt = aio_timer_new(ctx, type, SCALE_NS, co_sleep_cb, co);
     timer_mod(co->sleep_qt, qemu_clock_get_ns(type) + ns);
     qemu_coroutine_yield();
-    timer_del(co->sleep_qt);
-    timer_free(co->sleep_qt);
 }
