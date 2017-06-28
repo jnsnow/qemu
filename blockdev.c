@@ -2023,6 +2023,9 @@ static void block_dirty_bitmap_clear_prepare(BlkActionState *common,
     } else if (!bdrv_dirty_bitmap_enabled(state->bitmap)) {
         error_setg(errp, "Cannot clear a disabled bitmap");
         return;
+    } else if (bdrv_dirty_bitmap_readonly(state->bitmap)) {
+        error_setg(errp, "Cannot clear a readonly bitmap");
+        return;
     }
 
     bdrv_clear_dirty_bitmap(state->bitmap, &state->backup);
@@ -2790,6 +2793,9 @@ void qmp_block_dirty_bitmap_clear(const char *node, const char *name,
         error_setg(errp,
                    "Bitmap '%s' is currently disabled and cannot be cleared",
                    name);
+        return;
+    } else if (bdrv_dirty_bitmap_readonly(bitmap)) {
+        error_setg(errp, "Bitmap '%s' is readonly and cannot be cleared", name);
         return;
     }
 
