@@ -3104,7 +3104,7 @@ static int img_bitmap(int argc, char **argv)
     BlockBackend *blk;
     BlockDriverState *bs;
     const char *bname = NULL;
-    int flags = 0;
+    int flags;
     int ret = EXIT_SUCCESS;
     int (* handler)(BlockDriverState *b, BitmapOpts *opts);
 
@@ -3113,13 +3113,13 @@ static int img_bitmap(int argc, char **argv)
         return EXIT_FAILURE;
     }
     cmd = argv[1];
+    flags = BDRV_O_RDWR;
     if (strcmp(cmd, "dump") == 0) {
         handler = bitmap_cmd_dump;
+        flags &= BDRV_O_RDWR;
     } else if (strcmp(cmd, "clear") == 0) {
-        flags |= BDRV_O_RDWR;
         handler = bitmap_cmd_clear;
     } else if (strcmp(cmd, "rm") == 0) {
-        flags |= BDRV_O_RDWR;
         handler = bitmap_cmd_rm;
     } else {
         error_report("Unrecognized bitmap subcommand '%s'", cmd);
