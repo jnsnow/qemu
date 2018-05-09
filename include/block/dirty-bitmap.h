@@ -5,6 +5,11 @@
 #include "qapi/qapi-types-block-core.h"
 #include "qemu/hbitmap.h"
 
+BdrvDirtyBitmap *bdrv_user_create_dirty_bitmap(BlockDriverState *bs,
+                                               const char *name,
+                                               uint32_t granularity,
+                                               bool persistent,
+                                               Error **errp);
 BdrvDirtyBitmap *bdrv_create_dirty_bitmap(BlockDriverState *bs,
                                           uint32_t granularity,
                                           const char *name,

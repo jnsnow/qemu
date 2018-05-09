@@ -2804,49 +2804,18 @@ void qmp_block_dirty_bitmap_add(const char *node, const char *name,
                                 Error **errp)
 {
     BlockDriverState *bs;
-    BdrvDirtyBitmap *bitmap;
-
-    if (!name || name[0] == '\0') {
-        error_setg(errp, "Bitmap name cannot be empty");
-        return;
-    }
 
     bs = bdrv_lookup_bs(node, node, errp);
     if (!bs) {
         return;
     }
 
-    if (has_granularity) {
-        if (granularity < 512 || !is_power_of_2(granularity)) {
-            error_setg(errp, "Granularity must be power of 2 "
-                             "and at least 512");
-            return;
-        }
-    } else {
-        /* Default to cluster size, if available: */
-        granularity = bdrv_get_default_bitmap_granularity(bs);
-    }
-
-    if (!has_persistent) {
-        persistent = false;
-    }
-
     if (has_autoload) {
         warn_report("Autoload option is deprecated and its value is ignored");
     }
 
-    if (persistent &&
-        !bdrv_can_store_new_dirty_bitmap(bs, name, granularity, errp))
-    {
-        return;
-    }
-
-    bitmap = bdrv_create_dirty_bitmap(bs, granularity, name, errp);
-    if (bitmap == NULL) {
-        return;
-    }
-
-    bdrv_dirty_bitmap_set_persistance(bitmap, persistent);
+    bdrv_user_create_dirty_bitmap(bs, name, has_granularity ? granularity : 0,
+                                  has_persistent ? persistent : false, errp);
 }
 
 void qmp_block_dirty_bitmap_remove(const char *node, const char *name,

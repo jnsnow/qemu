@@ -106,6 +106,46 @@ void bdrv_dirty_bitmap_make_anon(BdrvDirtyBitmap *bitmap)
     bitmap->persistent = false;
 }
 
+/* Called with BQL taken. */
+BdrvDirtyBitmap *bdrv_user_create_dirty_bitmap(BlockDriverState *bs,
+                                               const char *name,
+                                               uint32_t granularity,
+                                               bool persistent,
+                                               Error **errp)
+{
+    BdrvDirtyBitmap *bitmap;
+
+    if (!name || name[0] == '\0') {
+        error_setg(errp, "Bitmap name cannot be empty");
+        return NULL;
+    }
+
+    if (granularity) {
+        if (granularity < 512 || !is_power_of_2(granularity)) {
+            error_setg(errp, "Granularity must be power of 2 "
+                             "and at least 512");
+            return NULL;
+        }
+    } else {
+        /* Default to cluster size, if available: */
+        granularity = bdrv_get_default_bitmap_granularity(bs);
+    }
+
+    if (persistent &&
+        !bdrv_can_store_new_dirty_bitmap(bs, name, granularity, errp))
+    {
+        return NULL;
+    }
+
+    bitmap = bdrv_create_dirty_bitmap(bs, granularity, name, errp);
+    if (bitmap == NULL) {
+        return NULL;
+    }
+
+    bdrv_dirty_bitmap_set_persistance(bitmap, persistent);
+    return bitmap;
+}
+
 /* Called with BQL taken.  */
 BdrvDirtyBitmap *bdrv_create_dirty_bitmap(BlockDriverState *bs,
                                           uint32_t granularity,
