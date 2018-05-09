@@ -3007,41 +3007,41 @@ typedef struct BitmapOpts {
     uint32_t granularity;
 } BitmapOpts;
 
-static int bitmap_cmd_dump(BlockDriverState *bs, const char *name,
-                           CommonOpts *opts)
+static int bitmap_cmd_dump(BlockDriverState *bs, BitmapOpts *opts)
 {
     BdrvDirtyBitmap *bitmap;
     BitmapMapping *bm;
     bool printed;
+    OutputFormat ofmt = opts->base.output_format;
 
-    if (name) {
-        bitmap = bdrv_find_dirty_bitmap(bs, name);
+    if (opts->name) {
+        bitmap = bdrv_find_dirty_bitmap(bs, opts->name);
         if (bitmap) {
             bm = get_bitmap_mapping(bitmap);
-            dump_bitmap_mapping(bm, opts->output_format, 0, stdout);
+            dump_bitmap_mapping(bm, ofmt, 0, stdout);
             qapi_free_BitmapMapping(bm);
         } else {
-            if (opts->output_format == OFORMAT_HUMAN) {
-                fprintf(stdout, "Bitmap '%s' not found\n", name);
+            if (ofmt == OFORMAT_HUMAN) {
+                fprintf(stdout, "Bitmap '%s' not found\n", opts->name);
             }
         }
     } else {
-        if (opts->output_format == OFORMAT_JSON) {
+        if (ofmt == OFORMAT_JSON) {
             fprintf(stdout, "[\n");
         }
         for (bitmap = NULL, printed = false;
              (bitmap = bdrv_dirty_bitmap_next(bs, bitmap)); printed = true) {
             if (printed) {
-                fprintf(stdout, opts->output_format == OFORMAT_JSON ? ",\n" : "\n");
+                fprintf(stdout, ofmt == OFORMAT_JSON ? ",\n" : "\n");
             }
             bm = get_bitmap_mapping(bitmap);
-            dump_bitmap_mapping(bm, opts->output_format, 1, stdout);
+            dump_bitmap_mapping(bm, ofmt, 1, stdout);
             qapi_free_BitmapMapping(bm);
         }
-        if (opts->output_format == OFORMAT_JSON) {
+        if (ofmt == OFORMAT_JSON) {
             fprintf(stdout, "%s%s", printed ? "\n" : "", "]\n");
         }
-        if (opts->output_format == OFORMAT_HUMAN && printed == false) {
+        if (ofmt == OFORMAT_HUMAN && printed == false) {
             fprintf(stdout, "No bitmaps are present in this image.\n");
         }
     }
