@@ -2886,6 +2886,185 @@ out1:
     return ret < 0;
 }
 
+static BitmapMapping *get_bitmap_mapping(BdrvDirtyBitmap *bitmap)
+{
+    BdrvDirtyBitmapIter *it = bdrv_dirty_iter_new(bitmap);
+    BitmapMapping *bm = g_new0(BitmapMapping, 1);
+    BitmapEntry *entry;
+    BitmapEntryList *tmp, **last;
+    int64_t offset;
+    int64_t zero_offset;
+
+    bm->name = g_strdup(bdrv_dirty_bitmap_name(bitmap));
+    bm->entries = NULL;
+    last = &bm->entries;
+
+    while (true) {
+        offset = bdrv_dirty_iter_next(it);
+        if (offset == -1) {
+            break;
+        }
+
+        zero_offset = bdrv_dirty_bitmap_next_zero(bitmap, offset);
+        if (zero_offset == -1) {
+            zero_offset = bdrv_dirty_bitmap_size(bitmap);
+        }
+
+        entry = g_new0(BitmapEntry, 1);
+        entry->offset = offset;
+        entry->length = zero_offset - offset;
+
+        tmp = g_new0(BitmapEntryList, 1);
+        tmp->value = entry;
+        *last = tmp;
+        last = &tmp->next;
+
+        if (zero_offset >= bdrv_dirty_bitmap_size(bitmap)) {
+            break;
+        }
+        bdrv_set_dirty_iter(it, zero_offset);
+    }
+
+    bdrv_dirty_iter_free(it);
+    return bm;
+}
+
+static void dump_bitmap_mapping_json(BitmapMapping *bm, int indent,
+                                     FILE *stream)
+{
+    QString *str;
+    QObject *obj;
+    Visitor *v = qobject_output_visitor_new(&obj);
+    const int pretty = 1;
+
+    visit_type_BitmapMapping(v, NULL, &bm, &error_abort);
+    visit_complete(v, &obj);
+    str = qobject_to_json_opt(obj, pretty, indent);
+    assert(str != NULL);
+    fprintf(stream, "%*s%s", 4 * indent, "", qstring_get_str(str));
+    qobject_unref(obj);
+    visit_free(v);
+    qobject_unref(str);
+}
+
+static void dump_bitmap_mapping_human(BitmapMapping *bm, FILE *stream)
+{
+    BitmapEntryList *bl = bm->entries;
+
+    fprintf(stream, "# %s\n", bm->name);
+    fprintf(stream, "%-16s%-16s\n", "Offset", "Length");
+    for ( ; bl; bl = bl->next) {
+        BitmapEntry *be = bl->value;
+        fprintf(stream, "%-16"PRId64"%-16"PRId64"\n", be->offset, be->length);
+    }
+}
+
+static void dump_bitmap_mapping(BitmapMapping *bm, OutputFormat output_format,
+                                int indent, FILE *stream)
+{
+    switch (output_format) {
+    case OFORMAT_JSON:
+        dump_bitmap_mapping_json(bm, indent, stream);
+        return;
+    case OFORMAT_HUMAN:
+        dump_bitmap_mapping_human(bm, stream);
+        return;
+    }
+}
+
+/* img_bitmap subcommands: dump */
+
+static int bitmap_cmd_dump(BlockDriverState *bs, const char *name,
+                           CommonOpts *opts)
+{
+    BdrvDirtyBitmap *bitmap;
+    BitmapMapping *bm;
+    bool printed;
+
+    if (name) {
+        bitmap = bdrv_find_dirty_bitmap(bs, name);
+        if (bitmap) {
+            bm = get_bitmap_mapping(bitmap);
+            dump_bitmap_mapping(bm, opts->output_format, 0, stdout);
+            qapi_free_BitmapMapping(bm);
+        } else {
+            if (opts->output_format == OFORMAT_HUMAN) {
+                fprintf(stdout, "Bitmap '%s' not found\n", name);
+            }
+        }
+    } else {
+        if (opts->output_format == OFORMAT_JSON) {
+            fprintf(stdout, "[\n");
+        }
+        for (bitmap = NULL, printed = false;
+             (bitmap = bdrv_dirty_bitmap_next(bs, bitmap)); printed = true) {
+            if (printed) {
+                fprintf(stdout, opts->output_format == OFORMAT_JSON ? ",\n" : "\n");
+            }
+            bm = get_bitmap_mapping(bitmap);
+            dump_bitmap_mapping(bm, opts->output_format, 1, stdout);
+            qapi_free_BitmapMapping(bm);
+        }
+        if (opts->output_format == OFORMAT_JSON) {
+            fprintf(stdout, "%s%s", printed ? "\n" : "", "]\n");
+        }
+        if (opts->output_format == OFORMAT_HUMAN && printed == false) {
+            fprintf(stdout, "No bitmaps are present in this image.\n");
+        }
+    }
+
+    return 0;
+}
+
+static int img_bitmap(int argc, char **argv)
+{
+    const char *cmd;
+    CommonOpts *opts;
+    BlockBackend *blk;
+    BlockDriverState *bs;
+    const char *bname = NULL;
+    int flags = 0;
+    int ret = EXIT_SUCCESS;
+    int (* handler)(BlockDriverState *b, const char *n, CommonOpts *o);
+
+    if (argc < 2) {
+        error_report("Expected a bitmap subcommand: <dump>");
+        return EXIT_FAILURE;
+    }
+    cmd = argv[1];
+    if (strcmp(cmd, "dump") == 0) {
+        handler = bitmap_cmd_dump;
+    } else {
+        error_report("Unrecognized bitmap subcommand '%s'", cmd);
+        return EXIT_FAILURE;
+    }
+
+    opts = parse_opts_common(--argc, ++argv);
+    if (!opts) {
+        return EXIT_FAILURE;
+    }
+    parse_positional(argc, argv, 0, &opts->filename, "filename");
+    parse_positional(argc, argv, 1, &bname, "bitmap");
+    parse_unexpected(argc, argv);
+
+    blk = img_open(opts->image_opts, opts->filename, opts->fmt, flags,
+                   false, false, opts->force_share);
+    if (!blk) {
+        ret = EXIT_FAILURE;
+        goto out;
+    }
+    bs = blk_bs(blk);
+
+    if (handler(bs, bname, opts)) {
+        ret = EXIT_FAILURE;
+    }
+
+    blk_unref(blk);
+ out:
+    g_free(opts);
+    return ret;
+}
+
 #define SNAPSHOT_LIST   1
 #define SNAPSHOT_CREATE 2
 #define SNAPSHOT_APPLY  3
