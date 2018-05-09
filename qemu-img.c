@@ -2999,7 +2999,7 @@ static int do_bitmap_clear(BlockDriverState *bs, BdrvDirtyBitmap *bitmap)
     return 0;
 }
 
-/* img_bitmap subcommands: dump, clear, rm */
+/* img_bitmap subcommands: dump, clear, rm, mk */
 
 typedef struct BitmapOpts {
     CommonOpts base;
@@ -3097,6 +3097,22 @@ static int bitmap_cmd_clear(BlockDriverState *bs, BitmapOpts *opts)
     return 0;
 }
 
+static int bitmap_cmd_mk(BlockDriverState *bs, BitmapOpts *opts)
+{
+    BdrvDirtyBitmap *bitmap = NULL;
+    Error *local_err = NULL;
+
+    assert(opts->name);
+    bitmap = bdrv_user_create_dirty_bitmap(bs, opts->name, opts->granularity,
+                                           true, &local_err);
+    if (!bitmap) {
+        error_report_err(local_err);
+        return -1;
+    }
+
+    return 0;
+}
+
 static int img_bitmap(int argc, char **argv)
 {
     const char *cmd;
@@ -3109,7 +3125,7 @@ static int img_bitmap(int argc, char **argv)
     int (* handler)(BlockDriverState *b, BitmapOpts *opts);
 
     if (argc < 2) {
-        error_report("Expected a bitmap subcommand: <dump | clear | rm>");
+        error_report("Expected a bitmap subcommand: <dump | clear | rm | mk>");
         return EXIT_FAILURE;
     }
     cmd = argv[1];
@@ -3121,6 +3137,8 @@ static int img_bitmap(int argc, char **argv)
         handler = bitmap_cmd_clear;
     } else if (strcmp(cmd, "rm") == 0) {
         handler = bitmap_cmd_rm;
+    } else if (strcmp(cmd, "mk") == 0) {
+        handler = bitmap_cmd_mk;
     } else {
         error_report("Unrecognized bitmap subcommand '%s'", cmd);
         return EXIT_FAILURE;
@@ -3131,7 +3149,20 @@ static int img_bitmap(int argc, char **argv)
         return EXIT_FAILURE;
     }
     parse_positional(argc, argv, 0, &opts->base.filename, "filename");
-    parse_positional(argc, argv, 1, &bname, "bitmap");
+    parse_positional(argc, argv, handler != bitmap_cmd_mk, &bname, "bitmap");
+    if (handler == bitmap_cmd_mk) {
+        const char *granularity = NULL;
+        uint64_t g;
+        parse_positional(argc, argv, 1, &granularity, "granularity");
+        if (granularity) {
+            qemu_strtou64(granularity, NULL, 10, &g);
+            if (g > UINT32_MAX) {
+                error_report("Granularity cannot exceed %"PRIu32, UINT32_MAX);
+                goto out;
+            }
+            opts->granularity = g;
+        }
+    }
     parse_unexpected(argc, argv);
 
     blk = img_open(opts->base.image_opts, opts->base.filename, opts->base.fmt,
