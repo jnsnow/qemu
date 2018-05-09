@@ -2972,6 +2972,23 @@ static void dump_bitmap_mapping(BitmapMapping *bm, OutputFormat output_format,
     }
 }
 
+static int do_bitmap_remove(BlockDriverState *bs, BdrvDirtyBitmap *bitmap)
+{
+    const char *name;
+    Error *local_err = NULL;
+
+    name = bdrv_dirty_bitmap_name(bitmap);
+    bdrv_remove_persistent_dirty_bitmap(bs, name, &local_err);
+    if (local_err) {
+        error_report_err(local_err);
+        return -1;
+    }
+    /* To prevent a persistent bitmap in-memory from being re-written */
+    bdrv_dirty_bitmap_make_anon(bitmap);
+    bdrv_release_dirty_bitmap(bs, bitmap);
+    return 0;
+}
+
 static int do_bitmap_clear(BlockDriverState *bs, BdrvDirtyBitmap *bitmap)
 {
     bool enabled = bdrv_dirty_bitmap_enabled(bitmap);
@@ -2987,7 +3004,7 @@ static int do_bitmap_clear(BlockDriverState *bs, BdrvDirtyBitmap *bitmap)
     return 0;
 }
 
-/* img_bitmap subcommands: dump, clear */
+/* img_bitmap subcommands: dump, clear, rm */
 
 static int bitmap_cmd_dump(BlockDriverState *bs, const char *name,
                            CommonOpts *opts)
@@ -3031,6 +3048,31 @@ static int bitmap_cmd_dump(BlockDriverState *bs, const char *name,
     return 0;
 }
 
+static int bitmap_cmd_rm(BlockDriverState *bs, const char *name,
+                         CommonOpts *opts)
+{
+    BdrvDirtyBitmap *bitmap;
+
+    if (name) {
+        bitmap = bdrv_find_dirty_bitmap(bs, name);
+        if (!bitmap) {
+            error_report("No bitmap named '%s' found", name);
+            return -1;
+        }
+        if (do_bitmap_remove(bs, bitmap)) {
+            return -1;
+        }
+    } else {
+        while ((bitmap = bdrv_dirty_bitmap_next(bs, NULL))) {
+            if (do_bitmap_remove(bs, bitmap)) {
+                return -1;
+            }
+        }
+    }
+
+    return 0;
+}
+
 static int bitmap_cmd_clear(BlockDriverState *bs, const char *name,
                             CommonOpts *opts)
 {
@@ -3068,7 +3110,7 @@ static int img_bitmap(int argc, char **argv)
     int (* handler)(BlockDriverState *b, const char *n, CommonOpts *o);
 
     if (argc < 2) {
-        error_report("Expected a bitmap subcommand: <dump | clear>");
+        error_report("Expected a bitmap subcommand: <dump | clear | rm>");
         return EXIT_FAILURE;
     }
     cmd = argv[1];
@@ -3077,6 +3119,9 @@ static int img_bitmap(int argc, char **argv)
     } else if (strcmp(cmd, "clear") == 0) {
         flags |= BDRV_O_RDWR;
         handler = bitmap_cmd_clear;
+    } else if (strcmp(cmd, "rm") == 0) {
+        flags |= BDRV_O_RDWR;
+        handler = bitmap_cmd_rm;
     } else {
         error_report("Unrecognized bitmap subcommand '%s'", cmd);
         return EXIT_FAILURE;
