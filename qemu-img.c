@@ -2736,10 +2736,9 @@ typedef struct CommonOpts {
     bool image_opts;
 } CommonOpts;
 
-static CommonOpts *parse_opts_common(int argc, char **argv)
+static int parse_opts_common(CommonOpts *opts, int argc, char **argv)
 {
     int c;
-    CommonOpts *opts = g_new0(CommonOpts, 1);
 
     for (;;) {
         int option_index = 0;
@@ -2780,7 +2779,7 @@ static CommonOpts *parse_opts_common(int argc, char **argv)
                 opts->output_format = OFORMAT_HUMAN;
             } else {
                 error_report("--output must be used with human or json as argument.");
-                goto err;
+                return -EINVAL;
             }
             break;
         case OPTION_OBJECT: {
@@ -2788,7 +2787,7 @@ static CommonOpts *parse_opts_common(int argc, char **argv)
             opts = qemu_opts_parse_noisily(&qemu_object_opts,
                                            optarg, true);
             if (!opts) {
-                goto err;
+                return -EINVAL;
             }
         }   break;
         case OPTION_IMAGE_OPTS:
@@ -2799,14 +2798,10 @@ static CommonOpts *parse_opts_common(int argc, char **argv)
     if (qemu_opts_foreach(&qemu_object_opts,
                           user_creatable_add_opts_foreach,
                           NULL, NULL)) {
-        goto err;
-        return NULL;
+        return -EINVAL;
     }
 
-    return opts;
- err:
-    g_free(opts);
-    return NULL;
+    return 0;
 }
 
 static void parse_positional(int argc, char *argv[],
@@ -2833,8 +2828,8 @@ static int img_map(int argc, char **argv)
     MapEntry curr = { .length = 0 }, next;
     CommonOpts *opts;
 
-    opts = parse_opts_common(argc, argv);
-    if (!opts) {
+    opts = g_new0(CommonOpts, 1);
+    if (parse_opts_common(opts, argc, argv)) {
         return EXIT_FAILURE;
     }
     parse_positional(argc, argv, 0, &opts->filename, "filename");
@@ -3005,6 +3000,12 @@ static int do_bitmap_clear(BlockDriverState *bs, BdrvDirtyBitmap *bitmap)
 }
 
 /* img_bitmap subcommands: dump, clear, rm */
+
+typedef struct BitmapOpts {
+    CommonOpts base;
+    const char *name;
+    uint32_t granularity;
+} BitmapOpts;
 
 static int bitmap_cmd_dump(BlockDriverState *bs, const char *name,
                            CommonOpts *opts)
