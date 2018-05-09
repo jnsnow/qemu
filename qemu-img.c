@@ -3100,13 +3100,13 @@ static int bitmap_cmd_clear(BlockDriverState *bs, BitmapOpts *opts)
 static int img_bitmap(int argc, char **argv)
 {
     const char *cmd;
-    CommonOpts *opts;
+    BitmapOpts *opts;
     BlockBackend *blk;
     BlockDriverState *bs;
     const char *bname = NULL;
     int flags = 0;
     int ret = EXIT_SUCCESS;
-    int (* handler)(BlockDriverState *b, const char *n, CommonOpts *o);
+    int (* handler)(BlockDriverState *b, BitmapOpts *opts);
 
     if (argc < 2) {
         error_report("Expected a bitmap subcommand: <dump | clear | rm>");
@@ -3126,23 +3126,23 @@ static int img_bitmap(int argc, char **argv)
         return EXIT_FAILURE;
     }
 
-    opts = parse_opts_common(--argc, ++argv);
-    if (!opts) {
+    opts = g_new0(BitmapOpts, 1);
+    if (parse_opts_common(&opts->base, --argc, ++argv)) {
         return EXIT_FAILURE;
     }
-    parse_positional(argc, argv, 0, &opts->filename, "filename");
+    parse_positional(argc, argv, 0, &opts->base.filename, "filename");
     parse_positional(argc, argv, 1, &bname, "bitmap");
     parse_unexpected(argc, argv);
 
-    blk = img_open(opts->image_opts, opts->filename, opts->fmt, flags,
-                   false, false, opts->force_share);
+    blk = img_open(opts->base.image_opts, opts->base.filename, opts->base.fmt,
+                   flags, false, false, opts->base.force_share);
     if (!blk) {
         ret = EXIT_FAILURE;
         goto out;
     }
     bs = blk_bs(blk);
 
-    if (handler(bs, bname, opts)) {
+    if (handler(bs, opts)) {
         ret = EXIT_FAILURE;
     }
 
