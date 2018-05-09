@@ -1352,12 +1352,11 @@ void qcow2_remove_persistent_dirty_bitmap(BlockDriverState *bs,
 {
     int ret;
     BDRVQcow2State *s = bs->opaque;
-    Qcow2Bitmap *bm;
+    Qcow2Bitmap *bm = NULL;
     Qcow2BitmapList *bm_list;
 
     if (s->nb_bitmaps == 0) {
-        /* Absence of the bitmap is not an error: see explanation above
-         * bdrv_remove_persistent_dirty_bitmap() definition. */
+        error_setg(errp, "No bitmaps are present in image");
         return;
     }
 
@@ -1368,7 +1367,8 @@ void qcow2_remove_persistent_dirty_bitmap(BlockDriverState *bs,
 
     bm = find_bitmap_by_name(bm_list, name);
     if (bm == NULL) {
-        goto fail;
+        error_setg(errp, "Could not find bitmap '%s'", name);
+        return;
     }
 
     QSIMPLEQ_REMOVE(bm_list, bm, Qcow2Bitmap, entry);
