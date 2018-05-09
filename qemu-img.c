@@ -3049,15 +3049,14 @@ static int bitmap_cmd_dump(BlockDriverState *bs, BitmapOpts *opts)
     return 0;
 }
 
-static int bitmap_cmd_rm(BlockDriverState *bs, const char *name,
-                         CommonOpts *opts)
+static int bitmap_cmd_rm(BlockDriverState *bs, BitmapOpts *opts)
 {
     BdrvDirtyBitmap *bitmap;
 
-    if (name) {
-        bitmap = bdrv_find_dirty_bitmap(bs, name);
+    if (opts->name) {
+        bitmap = bdrv_find_dirty_bitmap(bs, opts->name);
         if (!bitmap) {
-            error_report("No bitmap named '%s' found", name);
+            error_report("No bitmap named '%s' found", opts->name);
             return -1;
         }
         if (do_bitmap_remove(bs, bitmap)) {
