@@ -75,7 +75,7 @@ AHCICommandProp ahci_command_properties[] = {
     { .cmd = CMD_READ_MAX,       .lba28 = true },
     { .cmd = CMD_READ_MAX_EXT,   .lba48 = true },
     { .cmd = CMD_FLUSH_CACHE,    .data = false },
-    { .cmd = CMD_PACKET,         .data = true,  .size = 16,
+    { .cmd = CMD_PACKET,         .data = true,  .size = 12,
                                  .atapi = true, .pio = true },
     { .cmd = CMD_PACKET_ID,      .data = true,  .pio = true,
                                  .size = 512,   .read = true }
@@ -879,7 +879,7 @@ AHCICommand *ahci_command_create(uint8_t command_name)
 AHCICommand *ahci_atapi_command_create(uint8_t scsi_cmd, uint16_t bcl)
 {
     AHCICommand *cmd = ahci_command_create(CMD_PACKET);
-    cmd->atapi_cmd = g_malloc0(16);
+    cmd->atapi_cmd = g_malloc0(12);
     cmd->atapi_cmd[0] = scsi_cmd;
     stw_le_p(&cmd->fis.lba_lo[1], bcl);
     return cmd;
