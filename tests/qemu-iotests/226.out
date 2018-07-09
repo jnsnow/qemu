@@ -1,0 +1,15 @@
+QA output created by 226
+
+=== Testing with driver:file ===
+
+qemu-img: Could not open 'json:{'driver':'IMGFMT','file':{'driver':'file','filename':'/home/bos/jhuston/src/qemu/bin/git/tests/qemu-iotests/scratch/t.IMGFMT'}}': A regular file was expected by the 'file' driver, but something else was given
+
+=== Testing with driver:host_device ===
+
+qemu-img: Could not open 'json:{'driver':'IMGFMT','file':{'driver':'host_device','filename':'/home/bos/jhuston/src/qemu/bin/git/tests/qemu-iotests/scratch/t.IMGFMT'}}': 'host_device' driver expects either a character or block device
+
+=== Testing with driver:host_cdrom ===
+
+qemu-img: Could not open 'json:{'driver':'IMGFMT','file':{'driver':'host_cdrom','filename':'/home/bos/jhuston/src/qemu/bin/git/tests/qemu-iotests/scratch/t.IMGFMT'}}': 'host_cdrom' driver expects either a character or block device
+
+*** done
