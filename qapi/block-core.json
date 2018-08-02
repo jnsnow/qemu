@@ -1518,7 +1518,8 @@
 { 'command': 'block-commit',
   'data': { '*job-id': 'str', 'device': 'str', '*base': 'str', '*top': 'str',
             '*backing-file': 'str', '*speed': 'int',
-            '*filter-node-name': 'str' } }
+            '*filter-node-name': 'str',
+            '*auto-finalize': 'bool', '*auto-dismiss': 'bool' } }
 
 ##
 # @drive-backup:
