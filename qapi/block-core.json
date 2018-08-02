@@ -1728,7 +1728,8 @@
             '*speed': 'int', '*granularity': 'uint32',
             '*buf-size': 'int', '*on-source-error': 'BlockdevOnError',
             '*on-target-error': 'BlockdevOnError',
-            '*unmap': 'bool', '*copy-mode': 'MirrorCopyMode' } }
+            '*unmap': 'bool', '*copy-mode': 'MirrorCopyMode',
+            '*auto-finalize': 'bool', '*auto-dismiss': 'bool' } }
 
 ##
 # @BlockDirtyBitmap:
@@ -2015,7 +2016,8 @@
             '*buf-size': 'int', '*on-source-error': 'BlockdevOnError',
             '*on-target-error': 'BlockdevOnError',
             '*filter-node-name': 'str',
-            '*copy-mode': 'MirrorCopyMode' } }
+            '*copy-mode': 'MirrorCopyMode',
+            '*auto-finalize': 'bool', '*auto-dismiss': 'bool' } }
 
 ##
 # @block_set_io_throttle:
