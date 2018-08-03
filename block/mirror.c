@@ -79,6 +79,7 @@ typedef struct MirrorBlockJob {
     int max_iov;
     bool initial_zeroing_ongoing;
     int in_active_write_counter;
+    bool prepared;
 } MirrorBlockJob;
 
 typedef struct MirrorBDSOpaque {
@@ -607,7 +608,7 @@ static void mirror_wait_for_all_io(MirrorBlockJob *s)
     }
 }
 
-static void mirror_exit(Job *job)
+static int mirror_exit_common(Job *job)
 {
     MirrorBlockJob *s = container_of(job, MirrorBlockJob, common.job);
     BlockJob *bjob = &s->common;
@@ -618,6 +619,11 @@ static void mirror_exit(Job *job)
     BlockDriverState *mirror_top_bs = s->mirror_top_bs;
     Error *local_err = NULL;
     int ret = job->ret;
+
+    if (s->prepared) {
+        return ret;
+    }
+    s->prepared = true;
 
     bdrv_release_dirty_bitmap(src, s->dirty_bitmap);
 
@@ -711,7 +717,17 @@ static void mirror_exit(Job *job)
     bdrv_unref(mirror_top_bs);
     bdrv_unref(src);
 
-    job->ret = ret;
+    return ret;
+}
+
+static int mirror_prepare(Job *job)
+{
+    return mirror_exit_common(job);
+}
+
+static void mirror_abort(Job *job)
+{
+    mirror_exit_common(job);
 }
 
 static void mirror_throttle(MirrorBlockJob *s)
@@ -1132,7 +1148,8 @@ static const BlockJobDriver mirror_job_driver = {
         .user_resume            = block_job_user_resume,
         .drain                  = block_job_drain,
         .start                  = mirror_run,
-        .exit                   = mirror_exit,
+        .prepare                = mirror_prepare,
+        .abort                  = mirror_abort,
         .pause                  = mirror_pause,
         .complete               = mirror_complete,
     },
@@ -1149,7 +1166,8 @@ static const BlockJobDriver commit_active_job_driver = {
         .user_resume            = block_job_user_resume,
         .drain                  = block_job_drain,
         .start                  = mirror_run,
-        .exit                   = mirror_exit,
+        .prepare                = mirror_prepare,
+        .abort                  = mirror_abort,
         .pause                  = mirror_pause,
         .complete               = mirror_complete,
     },
