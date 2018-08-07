@@ -752,11 +752,6 @@ typedef struct TestBlockJob {
     bool should_complete;
 } TestBlockJob;
 
-static void test_job_completed(Job *job, void *opaque)
-{
-    job_completed(job, 0);
-}
-
 static void coroutine_fn test_job_start(void *opaque)
 {
     TestBlockJob *s = opaque;
@@ -769,8 +764,6 @@ static void coroutine_fn test_job_start(void *opaque)
         qemu_co_sleep_ns(QEMU_CLOCK_REALTIME, 100000);
         job_pause_point(&s->common.job);
     }
-
-    job_defer_to_main_loop(&s->common.job, test_job_completed, NULL);
 }
 
 static void test_job_complete(Job *job, Error **errp)
