@@ -558,7 +558,7 @@ static void coroutine_fn job_co_entry(void *opaque)
 
     assert(job && job->driver && job->driver->start);
     job_pause_point(job);
-    job->driver->start(job);
+    job->ret = job->driver->start(job);
     job->deferred_to_main_loop = true;
     aio_bh_schedule_oneshot(qemu_get_aio_context(), job_exit, job);
 }

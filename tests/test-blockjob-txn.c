@@ -32,24 +32,23 @@ static void test_block_job_exit(Job *job)
     bdrv_unref(bs);
 }
 
-static void coroutine_fn test_block_job_run(void *opaque)
+static int coroutine_fn test_block_job_run(Job *job)
 {
-    TestBlockJob *s = opaque;
-    BlockJob *job = &s->common;
+    TestBlockJob *s = container_of(job, TestBlockJob, common.job);
 
     while (s->iterations--) {
         if (s->use_timer) {
-            job_sleep_ns(&job->job, 0);
+            job_sleep_ns(job, 0);
         } else {
-            job_yield(&job->job);
+            job_yield(job);
         }
 
-        if (job_is_cancelled(&job->job)) {
+        if (job_is_cancelled(job)) {
             break;
         }
     }
 
-    s->common.job.ret = s->rc;
+    return s->rc;
 }
 
 typedef struct {

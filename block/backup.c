@@ -468,9 +468,9 @@ static void backup_incremental_init_copy_bitmap(BackupBlockJob *job)
     bdrv_dirty_iter_free(dbi);
 }
 
-static void coroutine_fn backup_run(void *opaque)
+static int coroutine_fn backup_run(Job *opaque_job)
 {
-    BackupBlockJob *job = opaque;
+    BackupBlockJob *job = container_of(opaque_job, BackupBlockJob, common.job);
     BlockDriverState *bs = blk_bs(job->common.blk);
     int64_t offset, nb_clusters;
     int ret = 0;
@@ -571,7 +571,7 @@ static void coroutine_fn backup_run(void *opaque)
     qemu_co_rwlock_unlock(&job->flush_rwlock);
     hbitmap_free(job->copy_bitmap);
 
-    job->common.job.ret = ret;
+    return ret;
 }
 
 static const BlockJobDriver backup_job_driver = {

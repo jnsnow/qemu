@@ -36,15 +36,17 @@ typedef struct BlockdevCreateJob {
     BlockdevCreateOptions *opts;
 } BlockdevCreateJob;
 
-static void coroutine_fn blockdev_create_run(void *opaque)
+static int coroutine_fn blockdev_create_run(Job *job)
 {
-    BlockdevCreateJob *s = opaque;
+    int ret;
+    BlockdevCreateJob *s = container_of(job, BlockdevCreateJob, common);
 
     job_progress_set_remaining(&s->common, 1);
-    s->common.ret = s->drv->bdrv_co_create(s->opts, &s->common.err);
+    ret = s->drv->bdrv_co_create(s->opts, &s->common.err);
     job_progress_update(&s->common, 1);
 
     qapi_free_BlockdevCreateOptions(s->opts);
+    return ret;
 }
 
 static const JobDriver blockdev_create_job_driver = {

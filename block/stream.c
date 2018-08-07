@@ -92,9 +92,9 @@ out:
     job->ret = ret;
 }
 
-static void coroutine_fn stream_run(void *opaque)
+static int coroutine_fn stream_run(Job *job)
 {
-    StreamBlockJob *s = opaque;
+    StreamBlockJob *s = container_of(job, StreamBlockJob, common.job);
     BlockBackend *blk = s->common.blk;
     BlockDriverState *bs = blk_bs(blk);
     BlockDriverState *base = s->base;
@@ -197,7 +197,7 @@ static void coroutine_fn stream_run(void *opaque)
 
 out:
     /* Modify backing chain and close BDSes in main loop */
-    s->common.job.ret = ret;
+    return ret;
 }
 
 static const BlockJobDriver stream_job_driver = {

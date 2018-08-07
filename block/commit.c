@@ -127,9 +127,9 @@ static void commit_exit(Job *job)
     job->ret = ret;
 }
 
-static void coroutine_fn commit_run(void *opaque)
+static int coroutine_fn commit_run(Job *job)
 {
-    CommitBlockJob *s = opaque;
+    CommitBlockJob *s = container_of(job, CommitBlockJob, common.job);
     int64_t offset;
     uint64_t delay_ns = 0;
     int ret = 0;
@@ -202,7 +202,7 @@ static void coroutine_fn commit_run(void *opaque)
 out:
     qemu_vfree(buf);
 
-    s->common.job.ret = ret;
+    return ret;
 }
 
 static const BlockJobDriver commit_job_driver = {

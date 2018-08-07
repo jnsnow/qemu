@@ -175,13 +175,13 @@ static void cancel_job_complete(Job *job, Error **errp)
     s->should_complete = true;
 }
 
-static void coroutine_fn cancel_job_start(void *opaque)
+static int coroutine_fn cancel_job_start(Job *job)
 {
-    CancelJob *s = opaque;
+    CancelJob *s = container_of(job, CancelJob, common.job);
 
     while (!s->should_complete) {
         if (job_is_cancelled(&s->common.job)) {
-            return;
+            goto out;
         }
 
         if (!job_is_ready(&s->common.job) && s->should_converge) {
@@ -190,6 +190,9 @@ static void coroutine_fn cancel_job_start(void *opaque)
 
         job_sleep_ns(&s->common.job, 100000);
     }
+
+ out:
+    return 0;
 }
 
 static const BlockJobDriver test_cancel_driver = {
