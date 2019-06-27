@@ -2154,7 +2154,8 @@ static void block_dirty_bitmap_remove_prepare(BlkActionState *common,
     state->bitmap = do_block_dirty_bitmap_remove(action->node, action->name,
                                                  false, &state->bs, errp);
     if (state->bitmap) {
-        bdrv_dirty_bitmap_hide(state->bitmap);
+        bdrv_dirty_bitmap_squelch_persistence(state->bitmap, true);
+        bdrv_dirty_bitmap_set_busy(state->bitmap, true);
     }
 }
 
@@ -2163,7 +2164,10 @@ static void block_dirty_bitmap_remove_abort(BlkActionState *common)
     BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
                                              common, common);
 
-    bdrv_dirty_bitmap_unhide(state->bitmap);
+    if (state->bitmap) {
+        bdrv_dirty_bitmap_squelch_persistence(state->bitmap, false);
+        bdrv_dirty_bitmap_set_busy(state->bitmap, false);
+    }
 }
 
 static void block_dirty_bitmap_remove_commit(BlkActionState *common)
@@ -2171,6 +2175,7 @@ static void block_dirty_bitmap_remove_commit(BlkActionState *common)
     BlockDirtyBitmapState *state = DO_UPCAST(BlockDirtyBitmapState,
                                              common, common);
 
+    bdrv_dirty_bitmap_set_busy(state->bitmap, false);
     bdrv_release_dirty_bitmap(state->bs, state->bitmap);
 }
 

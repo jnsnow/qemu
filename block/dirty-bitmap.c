@@ -34,10 +34,6 @@ struct BdrvDirtyBitmap {
     bool busy;                  /* Bitmap is busy, it can't be used via QMP */
     BdrvDirtyBitmap *successor; /* Anonymous child, if any. */
     char *name;                 /* Optional non-empty unique ID */
-    char *hidden_name;          /* Backup of @name for removal transaction
-                                   action. Used for hide/unhide API. */
-    bool hidden_persistent;     /* Backup of @persistent for removal transaction
-                                   action. */
     int64_t size;               /* Size of the bitmap, in bytes */
     bool disabled;              /* Bitmap is disabled. It ignores all writes to
                                    the device */
@@ -52,10 +48,9 @@ struct BdrvDirtyBitmap {
     bool inconsistent;          /* bitmap is persistent, but inconsistent.
                                    It cannot be used at all in any way, except
                                    a QMP user can remove it. */
-    bool migration;             /* Bitmap is selected for migration, it should
-                                   not be stored on the next inactivation
-                                   (persistent flag doesn't matter until next
-                                   invalidation).*/
+    bool squelch_persistence;   /* We are either migrating or deleting this
+                                 * bitmap; it should not be stored on the next
+                                 * inactivation. */
     QLIST_ENTRY(BdrvDirtyBitmap) list;
 };
 
@@ -761,16 +756,17 @@ void bdrv_dirty_bitmap_set_inconsistent(BdrvDirtyBitmap *bitmap)
 }
 
 /* Called with BQL taken. */
-void bdrv_dirty_bitmap_set_migration(BdrvDirtyBitmap *bitmap, bool migration)
+void bdrv_dirty_bitmap_squelch_persistence(BdrvDirtyBitmap *bitmap,
+                                           bool squelch)
 {
     qemu_mutex_lock(bitmap->mutex);
-    bitmap->migration = migration;
+    bitmap->squelch_persistence = squelch;
     qemu_mutex_unlock(bitmap->mutex);
 }
 
 bool bdrv_dirty_bitmap_get_persistence(BdrvDirtyBitmap *bitmap)
 {
-    return bitmap->persistent && !bitmap->migration;
+    return bitmap->persistent && !bitmap->squelch_persistence;
 }
 
 bool bdrv_dirty_bitmap_inconsistent(const BdrvDirtyBitmap *bitmap)
@@ -782,7 +778,7 @@ bool bdrv_has_changed_persistent_bitmaps(BlockDriverState *bs)
 {
     BdrvDirtyBitmap *bm;
     QLIST_FOREACH(bm, &bs->dirty_bitmaps, list) {
-        if (bm->persistent && !bm->readonly && !bm->migration) {
+        if (bm->persistent && !bm->readonly && !bm->squelch_persistence) {
             return true;
         }
     }
@@ -851,26 +847,4 @@ out:
     if (src->mutex != dest->mutex) {
         qemu_mutex_unlock(src->mutex);
     }
-}
-
-void bdrv_dirty_bitmap_hide(BdrvDirtyBitmap *bitmap)
-{
-    qemu_mutex_lock(bitmap->mutex);
-    assert(!bitmap->hidden_name);
-    bitmap->hidden_name = bitmap->name;
-    bitmap->hidden_persistent = bitmap->persistent;
-    bitmap->name = NULL;
-    bitmap->persistent = false;
-    qemu_mutex_unlock(bitmap->mutex);
-}
-
-void bdrv_dirty_bitmap_unhide(BdrvDirtyBitmap *bitmap)
-{
-    qemu_mutex_lock(bitmap->mutex);
-    assert(!bitmap->name);
-    bitmap->name = bitmap->hidden_name;
-    bitmap->persistent = bitmap->hidden_persistent;
-    bitmap->hidden_name = NULL;
-    bitmap->hidden_persistent = false;
-    qemu_mutex_unlock(bitmap->mutex);
 }
