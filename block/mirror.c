@@ -1559,11 +1559,6 @@ static BlockJob *mirror_start_job(
                        MirrorSyncMode_str(sync_mode));
             return NULL;
         }
-    } else if (bitmap) {
-        error_setg(errp,
-                   "sync mode \"%s\" is not compatible with bitmaps",
-                   MirrorSyncMode_str(sync_mode));
-        return NULL;
     }
 
     if (bitmap) {
@@ -1574,7 +1569,6 @@ static BlockJob *mirror_start_job(
             return NULL;
         }
         granularity = bdrv_dirty_bitmap_granularity(bitmap);
-
         if (bitmap_mode != BITMAP_SYNC_MODE_NEVER) {
             if (bdrv_dirty_bitmap_check(bitmap, BDRV_BITMAP_DEFAULT, errp)) {
                 return NULL;
