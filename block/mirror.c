@@ -1554,8 +1554,8 @@ static BlockJob *mirror_start_job(
         return NULL;
     } else if (sync_mode == MIRROR_SYNC_MODE_BITMAP) {
         if (!bitmap) {
-            error_setg(errp, "Must provide a valid bitmap name for "
-                       "\"%s\" sync mode",
+            error_setg(errp, "Must provide a valid bitmap name for \"%s\""
+                       " sync mode",
                        MirrorSyncMode_str(sync_mode));
             return NULL;
         }
