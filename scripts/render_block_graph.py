@@ -18,6 +18,7 @@
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #
 
+import argparse
 import os
 import sys
 import subprocess
@@ -25,6 +26,7 @@ import json
 from graphviz import Digraph
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'python'))
+from qemu.qmp import QEMUMonitorProtocol
 from qemu.machine import MonitorResponseError
 
 
@@ -53,16 +55,16 @@ def render_block_graph(qmp, filename, format='png'):
 
     graph = Digraph(comment='Block Nodes Graph')
     graph.format = format
-    graph.node('permission symbols:\l'
-               '  w - Write\l'
-               '  r - consistent-Read\l'
-               '  u - write - Unchanged\l'
-               '  g - Graph-mod\l'
-               '  s - reSize\l'
-               'edge label scheme:\l'
-               '  <child type>\l'
-               '  <perm>\l'
-               '  <shared_perm>\l', shape='none')
+    graph.node(r'permission symbols:\l'
+               r'  w - Write\l'
+               r'  r - consistent-Read\l'
+               r'  u - write - Unchanged\l'
+               r'  g - Graph-mod\l'
+               r'  s - reSize\l'
+               r'edge label scheme:\l'
+               r'  <child type>\l'
+               r'  <perm>\l'
+               r'  <shared_perm>\l', shape='none')
 
     for n in block_graph['nodes']:
         if n['type'] == 'block-driver':
@@ -83,8 +85,8 @@ def render_block_graph(qmp, filename, format='png'):
         graph.node(str(n['id']), label, shape=shape)
 
     for e in block_graph['edges']:
-        label = '%s\l%s\l%s\l' % (e['name'], perm(e['perm']),
-                                  perm(e['shared-perm']))
+        label = r'%s\l%s\l%s\l' % (e['name'], perm(e['perm']),
+                                   perm(e['shared-perm']))
         graph.edge(str(e['parent']), str(e['child']), label=label)
 
     graph.render(filename)
@@ -107,16 +109,30 @@ class LibvirtGuest():
         return reply['return']
 
 
-if __name__ == '__main__':
-    obj = sys.argv[1]
-    out = sys.argv[2]
+def main():
+    parser = argparse.ArgumentParser(description="Connect via QMP, query block "
+                                     "data, and render a visualization.")
+    parser.add_argument("server", help="unix socket, tcp address,"
+                        " or libvirt guest name")
+    parser.add_argument("outfile")
+    args = parser.parse_args()
 
-    if os.path.exists(obj):
+    if os.path.exists(args.server):
         # assume unix socket
-        qmp = QEMUMonitorProtocol(obj)
+        qmp = QEMUMonitorProtocol(args.server)
+        qmp.connect()
+    elif ':' in args.server:
+        # TCP socket address
+        addr = args.server.split(':')
+        addr = (addr[0], int(addr[1]))
+        qmp = QEMUMonitorProtocol(addr)
         qmp.connect()
     else:
         # assume libvirt guest name
-        qmp = LibvirtGuest(obj)
+        qmp = LibvirtGuest(args.server)
 
-    render_block_graph(qmp, out)
+    render_block_graph(qmp, args.outfile)
+
+
+if __name__ == '__main__':
+    main()
