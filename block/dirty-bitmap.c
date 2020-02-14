@@ -579,6 +579,7 @@ BlockDirtyInfoList *bdrv_query_dirty_bitmaps(BlockDriverState *bs)
         info->persistent = bm->persistent;
         info->has_inconsistent = bm->inconsistent;
         info->inconsistent = bm->inconsistent;
+        info->readonly = bdrv_dirty_bitmap_readonly(bm);
         entry->value = info;
         *plist = entry;
         plist = &entry->next;

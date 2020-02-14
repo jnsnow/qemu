@@ -497,7 +497,7 @@
 { 'struct': 'BlockDirtyInfo',
   'data': {'*name': 'str', 'count': 'int', 'granularity': 'uint32',
            'recording': 'bool', 'busy': 'bool', 'status': 'DirtyBitmapStatus',
-           'persistent': 'bool', '*inconsistent': 'bool' } }
+           'persistent': 'bool', 'readonly': 'bool', '*inconsistent': 'bool' } }
 
 ##
 # @Qcow2BitmapInfoFlags:
