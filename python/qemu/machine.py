@@ -359,9 +359,51 @@ class QEMUMachine:
             self._qmp.close()
         self._post_shutdown()
 
-    def shutdown(self, has_quit=False, hard=False):
+    def _hard_shutdown(self) -> None:
         """
-        Terminate the VM and clean up
+        Kill the VM if it is running.
+        """
+        if not self.is_running():
+            return
+
+        self._popen.kill()
+        self._popen.wait(timeout=60)
+
+    def _soft_shutdown(self, has_quit: bool = False, timeout: int = 3) -> None:
+        """
+        Attempt to shutdown the VM gracefully if it is running.
+
+        :param has_quit: When True, don't attempt to issue 'quit' QMP command
+        :param timeout: Timeout for graceful shutdown. Default 3 seconds.
+        """
+        if not self.is_running():
+            return
+
+        if self._qmp is not None:
+            if not has_quit:
+                self._qmp.cmd('quit')
+            self._qmp.close()
+
+        self._popen.wait(timeout=timeout)
+
+    def _do_shutdown(self, has_quit: bool = False, timeout: int = 3) -> None:
+        """
+        Attempt to shutdown the VM gracefully; fallback to a hard shutdown.
+
+        :param has_quit: When True, don't attempt to issue 'quit' QMP command
+        :param timeout: Timeout for graceful shutdown. Default 3 seconds.
+        """
+        try:
+            self._soft_shutdown(has_quit, timeout)
+        except subprocess.TimeoutExpired:
+            self._hard_shutdown()
+        except:
+            self._hard_shutdown()
+            raise
+
+    def shutdown(self, has_quit: bool = False, hard: bool = False) -> None:
+        """
+        Terminate the VM (gracefully if possible) and perform cleanup.
         """
         # If we keep the console socket open, we may deadlock waiting
         # for QEMU to exit, while QEMU is waiting for the socket to
@@ -370,22 +412,18 @@ class QEMUMachine:
             self._console_socket.close()
             self._console_socket = None
 
-        if self.is_running():
+        try:
             if hard:
-                self._popen.kill()
-            elif self._qmp:
-                try:
-                    if not has_quit:
-                        self._qmp.cmd('quit')
-                    self._qmp.close()
-                    self._popen.wait(timeout=3)
-                except:
-                    self._popen.kill()
-            self._popen.wait()
-
-        self._post_shutdown()
+                self._hard_shutdown()
+            else:
+                self._do_shutdown(has_quit)
+        finally:
+            self._post_shutdown()
 
     def kill(self):
+        """
+        Terminate the VM forcefully and perform cleanup.
+        """
         self.shutdown(hard=True)
 
     def set_qmp_monitor(self, enabled=True):
