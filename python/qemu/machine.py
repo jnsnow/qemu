@@ -22,6 +22,7 @@ import logging
 import os
 import subprocess
 import shutil
+import signal
 import socket
 import tempfile
 from typing import Optional, Type
@@ -122,6 +123,7 @@ class QEMUMachine:
         self._console_address = None
         self._console_socket = None
         self._remove_files = []
+        self._killed = False
 
     def __enter__(self):
         return self
@@ -282,7 +284,7 @@ class QEMUMachine:
         if self._qmp:
             self._qmp.accept()
 
-    def _post_shutdown(self):
+    def _post_shutdown(self) -> None:
         self._load_io_log()
 
         if self._qemu_log_file is not None:
@@ -299,7 +301,8 @@ class QEMUMachine:
             self._remove_if_exists(self._remove_files.pop())
 
         exitcode = self.exitcode()
-        if exitcode is not None and exitcode < 0:
+        if (exitcode is not None and exitcode < 0
+                and not (self._killed and exitcode == -signal.SIGKILL)):
             msg = 'qemu received signal %i; command: "%s"'
             if self._qemu_full_args:
                 command = ' '.join(self._qemu_full_args)
@@ -307,6 +310,7 @@ class QEMUMachine:
                 command = ''
             LOG.warning(msg, -int(exitcode), command)
 
+        self._killed = False
         self._launched = False
 
     def launch(self):
@@ -414,6 +418,7 @@ class QEMUMachine:
 
         try:
             if hard:
+                self._killed = True
                 self._hard_shutdown()
             else:
                 self._do_shutdown(has_quit)
