@@ -385,7 +385,14 @@ class QEMUMachine:
 
         if self._qmp is not None:
             if not has_quit:
-                self._qmp.cmd('quit')
+                try:
+                    self._qmp.cmd('quit')
+                except (BrokenPipeError, ConnectionResetError):
+                    # QMP went away just before or just after sending 'quit'
+                    if not self.is_running():
+                        # "Mission Accomplished"
+                        pass
+                    raise
             self._qmp.close()
 
         self._popen.wait(timeout=timeout)
