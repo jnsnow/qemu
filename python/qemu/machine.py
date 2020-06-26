@@ -118,7 +118,7 @@ class QEMUMachine:
         self._events = []
         self._iolog = None
         self._qmp_set = True   # Enable QMP monitor by default.
-        self._qmp = None
+        self._qmp_connection: Optional[qmp.QEMUMonitorProtocol] = None
         self._qemu_full_args = None
         self._temp_dir = None
         self._launched = False
@@ -285,14 +285,14 @@ class QEMUMachine:
             if self._remove_monitor_sockfile:
                 assert isinstance(self._monitor_address, str)
                 self._remove_files.append(self._monitor_address)
-            self._qmp = qmp.QEMUMonitorProtocol(
+            self._qmp_connection = qmp.QEMUMonitorProtocol(
                 self._monitor_address,
                 server=True,
                 nickname=self._name
             )
 
     def _post_launch(self):
-        if self._qmp:
+        if self._qmp_connection:
             self._qmp.accept()
 
     def _post_shutdown(self) -> None:
@@ -370,7 +370,7 @@ class QEMUMachine:
         Wait for the VM to power off
         """
         self._popen.wait()
-        if self._qmp:
+        if self._qmp_connection:
             self._qmp.close()
         self._post_shutdown()
 
@@ -459,11 +459,13 @@ class QEMUMachine:
                         line. Default is True.
         @note: call this function before launch().
         """
-        if enabled:
-            self._qmp_set = True
-        else:
-            self._qmp_set = False
-            self._qmp = None
+        self._qmp_set = enabled
+
+    @property
+    def _qmp(self) -> qmp.QEMUMonitorProtocol:
+        if self._qmp_connection is None:
+            raise QEMUMachineError("Attempt to access QMP with no connection")
+        return self._qmp_connection
 
     @classmethod
     def _qmp_args(cls, _conv_keys: bool = True, **args: Any) -> Dict[str, Any]:
