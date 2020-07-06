@@ -420,12 +420,14 @@ class QEMUMachine:
         self._subp.kill()
         self._wait(timeout=60)
 
-    def _soft_shutdown(self, has_quit: bool = False, timeout: int = 3) -> None:
+    def _soft_shutdown(self, has_quit: bool = False,
+                       timeout: Optional[int] = 3) -> None:
         """
         Attempt to gracefully shut down the VM and wait for it to terminate.
 
         :param has_quit: When True, don't attempt to issue 'quit' QMP command
-        :param timeout: Timeout for graceful shutdown. Default 3 seconds.
+        :param timeout: Optional timeout in seconds for graceful shutdown.
+                        Default 3 seconds, A value of None is an infinite wait.
         """
         if self._qmp_connection:
             if not has_quit:
@@ -435,12 +437,14 @@ class QEMUMachine:
         # May raise subprocess.TimeoutExpired
         self._wait(timeout=timeout)
 
-    def _do_shutdown(self, has_quit: bool = False, timeout: int = 3) -> None:
+    def _do_shutdown(self, has_quit: bool = False,
+                     timeout: Optional[int] = 3) -> None:
         """
         Attempt to shutdown the VM gracefully; fallback to a hard shutdown.
 
         :param has_quit: When True, don't attempt to issue 'quit' QMP command
-        :param timeout: Timeout in seconds for graceful shutdown. Default 3.
+        :param timeout: Optional timeout in seconds for graceful shutdown.
+                        Default 3 seconds, A value of None is an infinite wait.
 
         :raise AbnormalShutdown: When the VM could not be shut down gracefully.
             The inner exception will likely be ConnectionReset or
@@ -454,7 +458,9 @@ class QEMUMachine:
             raise AbnormalShutdown("Could not perform graceful shutdown") \
                 from exc
 
-    def shutdown(self, has_quit: bool = False, hard: bool = False) -> None:
+    def shutdown(self, has_quit: bool = False,
+                 hard: bool = False,
+                 timeout: Optional[int] = 3) -> None:
         """
         Terminate the VM (gracefully if possible) and perform cleanup.
         Cleanup will always be performed.
@@ -462,6 +468,8 @@ class QEMUMachine:
         :param has_quit: When true, do not attempt to issue 'quit' QMP command.
         :param hard: When true, do not attempt graceful shutdown, and
                      suppress the SIGKILL warning log message.
+        :param timeout: Optional timeout in seconds for graceful shutdown.
+                        Default 3 seconds, A value of None is an infinite wait.
         """
         if not self._launched:
             return
@@ -471,7 +479,7 @@ class QEMUMachine:
                 self._user_killed = True
                 self._hard_shutdown()
             else:
-                self._do_shutdown(has_quit)
+                self._do_shutdown(has_quit, timeout=timeout)
         finally:
             self._post_shutdown()
 
@@ -481,11 +489,14 @@ class QEMUMachine:
         """
         self.shutdown(hard=True)
 
-    def wait(self) -> None:
+    def wait(self, timeout: Optional[int] = 3) -> None:
         """
         Wait for the VM to power off and perform post-shutdown cleanup.
+
+        :param timeout: Optional timeout in seconds.
+                        Default 3 seconds, A value of None is an infinite wait.
         """
-        self.shutdown(has_quit=True)
+        self.shutdown(has_quit=True, timeout=timeout)
 
     def set_qmp_monitor(self, enabled: bool = True) -> None:
         """
