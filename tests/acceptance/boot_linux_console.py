@@ -511,7 +511,7 @@ class BootLinuxConsole(LinuxKernelTest):
         exec_command_and_wait_for_pattern(self, 'reboot',
                                                 'reboot: Restarting system')
         # Wait for VM to shut down gracefully
-        self.vm.wait(timeout=5)
+        self.vm.wait(timeout=60)
 
     def test_arm_cubieboard_sata(self):
         """
