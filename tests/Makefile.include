@@ -944,7 +944,8 @@ check-acceptance: check-venv $(TESTS_RESULTS_DIR) get-vm-images
             --show=$(AVOCADO_SHOW) run --job-results-dir=$(TESTS_RESULTS_DIR) \
             --filter-by-tags-include-empty --filter-by-tags-include-empty-key \
             $(AVOCADO_TAGS) \
-            --failfast=on tests/acceptance, \
+            --job-timeout=0 \
+            --failfast=off tests/acceptance, \
             "AVOCADO", "tests/acceptance")
 
 # Consolidated targets
