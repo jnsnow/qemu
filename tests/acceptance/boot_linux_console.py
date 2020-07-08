@@ -192,7 +192,7 @@ class BootLinuxConsole(LinuxKernelTest):
         exec_command_and_wait_for_pattern(self, 'reboot',
                                                 'reboot: Restarting system')
         # Wait for VM to shut down gracefully
-        self.vm.wait(timeout=5)
+        self.vm.wait()
 
     @skipUnless(os.getenv('AVOCADO_ALLOW_UNTRUSTED_CODE'), 'untrusted code')
     def test_mips64el_malta_5KEc_cpio(self):
@@ -234,7 +234,7 @@ class BootLinuxConsole(LinuxKernelTest):
         exec_command_and_wait_for_pattern(self, 'reboot',
                                                 'reboot: Restarting system')
         # Wait for VM to shut down gracefully
-        self.vm.wait(timeout=5)
+        self.vm.wait()
 
     def do_test_mips_malta32el_nanomips(self, kernel_url, kernel_hash):
         kernel_path_xz = self.fetch_asset(kernel_url, asset_hash=kernel_hash)
@@ -511,7 +511,7 @@ class BootLinuxConsole(LinuxKernelTest):
         exec_command_and_wait_for_pattern(self, 'reboot',
                                                 'reboot: Restarting system')
         # Wait for VM to shut down gracefully
-        self.vm.wait(timeout=60)
+        self.vm.wait()
 
     def test_arm_cubieboard_sata(self):
         """
@@ -557,7 +557,7 @@ class BootLinuxConsole(LinuxKernelTest):
         exec_command_and_wait_for_pattern(self, 'reboot',
                                                 'reboot: Restarting system')
         # Wait for VM to shut down gracefully
-        self.vm.wait(timeout=5)
+        self.vm.wait()
 
     def test_arm_orangepi(self):
         """
@@ -624,7 +624,7 @@ class BootLinuxConsole(LinuxKernelTest):
         exec_command_and_wait_for_pattern(self, 'reboot',
                                                 'reboot: Restarting system')
         # Wait for VM to shut down gracefully
-        self.vm.wait(timeout=5)
+        self.vm.wait()
 
     def test_arm_orangepi_sd(self):
         """
@@ -673,7 +673,7 @@ class BootLinuxConsole(LinuxKernelTest):
         exec_command_and_wait_for_pattern(self, 'reboot',
                                                 'reboot: Restarting system')
         # Wait for VM to shut down gracefully
-        self.vm.wait(timeout=5)
+        self.vm.wait()
 
     @skipUnless(os.getenv('AVOCADO_ALLOW_LARGE_STORAGE'), 'storage limited')
     @skipUnless(P7ZIP_AVAILABLE, '7z not installed')
