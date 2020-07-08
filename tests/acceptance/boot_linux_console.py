@@ -78,7 +78,7 @@ class BootLinuxConsole(LinuxKernelTest):
     Boots a Linux kernel and checks that the console is operational and the
     kernel command line is properly passed from QEMU to the kernel
     """
-    timeout = 90
+    timeout = 1200
 
     def test_x86_64_pc(self):
         """
