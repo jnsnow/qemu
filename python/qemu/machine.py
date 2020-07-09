@@ -316,6 +316,13 @@ class QEMUMachine:
         Called to cleanup the VM instance after the process has exited.
         May also be called after a failed launch.
         """
+        # Comprehensive reset for the failed launch case:
+        self._early_cleanup()
+
+        if self._qmp_connection:
+            self._qmp.close()
+            self._qmp_connection = None
+
         self._load_io_log()
 
         if self._qemu_log_file is not None:
@@ -359,7 +366,6 @@ class QEMUMachine:
             self._launch()
             self._launched = True
         except:
-            self._early_cleanup()
             self._post_shutdown()
 
             LOG.debug('Error launching VM')
@@ -393,7 +399,9 @@ class QEMUMachine:
     def _early_cleanup(self) -> None:
         """
         Perform any cleanup that needs to happen before the VM exits.
-        This function may be called both before and after actual shutdown.
+
+        May be invoked by both soft and hard shutdown in failover scenarios.
+        Called additionally by _post_shutdown for comprehensive cleanup.
         """
         # If we keep the console socket open, we may deadlock waiting
         # for QEMU to exit, while QEMU is waiting for the socket to
@@ -402,40 +410,40 @@ class QEMUMachine:
             self._console_socket.close()
             self._console_socket = None
 
-        if self._qmp_connection:
-            self._qmp.close()
-            self._qmp_connection = None
-
-    def _wait(self, timeout: Optional[int] = None) -> None:
-        """
-        Perform early cleanup, then wait for the VM to power off.
-        """
-        self._early_cleanup()
-        self._subp.wait(timeout=timeout)
-
     def _hard_shutdown(self) -> None:
         """
-        Attempt to kill the VM and wait for it to terminate.
+        Perform early cleanup, kill the VM, and wait for it to terminate.
+
+        :raise subprocess.Timeout: When timeout is exceeds 60 seconds
+            waiting for the QEMU process to terminate.
         """
+        self._early_cleanup()
         self._subp.kill()
-        self._wait(timeout=60)
+        self._subp.wait(timeout=60)
 
     def _soft_shutdown(self, has_quit: bool = False,
                        timeout: Optional[int] = 3) -> None:
         """
-        Attempt to gracefully shut down the VM and wait for it to terminate.
+        Perform early cleanup, attempt to gracefully shut down the VM, and wait
+        for it to terminate.
 
         :param has_quit: When True, don't attempt to issue 'quit' QMP command
         :param timeout: Optional timeout in seconds for graceful shutdown.
                         Default 3 seconds, A value of None is an infinite wait.
+
+        :raise ConnectionReset: On QMP communication errors
+        :raise subprocess.TimeoutExpired: When timeout is exceeded waiting for
+            the QEMU process to terminate.
         """
+        self._early_cleanup()
+
         if self._qmp_connection:
             if not has_quit:
                 # Might raise ConnectionReset
                 self._qmp.cmd('quit')
 
         # May raise subprocess.TimeoutExpired
-        self._wait(timeout=timeout)
+        self._subp.wait(timeout=timeout)
 
     def _do_shutdown(self, has_quit: bool = False,
                      timeout: Optional[int] = 3) -> None:
@@ -485,7 +493,7 @@ class QEMUMachine:
 
     def kill(self) -> None:
         """
-        Terminate the VM forcefully and perform cleanup.
+        Terminate the VM forcefully, wait for it to exit, and perform cleanup.
         """
         self.shutdown(hard=True)
 
