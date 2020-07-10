@@ -138,13 +138,13 @@ _do_filter_img_create()
     # Split the line into the pre-options part ($filename_part, which
     # precedes ", fmt=") and the options part ($options, which starts
     # with "fmt=")
-    # (And just echo everything before the first "^Formatting")
-    readarray formatting_line < <($SED -e 's/, fmt=/\n/')
+    read formatting_line
 
-    filename_part=${formatting_line[0]}
-    unset formatting_line[0]
+    # Split line at the first ", fmt="
+    formatting_line=$(echo "$formatting_line" | $SED -e 's/, fmt=/\nfmt=/')
 
-    options="fmt=${formatting_line[@]}"
+    filename_part=$(echo "$formatting_line" | head -n 1)
+    options=$(echo "$formatting_line" | tail -n +2)
 
     # Set grep_data_file to '\|data_file' to keep it; make it empty
     # to drop it.
